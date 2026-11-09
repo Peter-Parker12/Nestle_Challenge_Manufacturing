@@ -1,0 +1,48 @@
+# BAF-1 Launch Accelerator
+# Only the app is exposed (port 9361). Postgres is reachable on the internal network only.
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - baf1_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      CLAUDE_MODEL_MAIN: ${CLAUDE_MODEL_MAIN:-claude-sonnet-5-5}
+      CLAUDE_MODEL_FAST: ${CLAUDE_MODEL_FAST:-claude-haiku-5-5}
+      MIN_MATCHED_LAUNCHES: ${MIN_MATCHED_LAUNCHES:-3}
+      TOP_N_NEIGHBOURS: ${TOP_N_NEIGHBOURS:-7}
+      SEED_MODE: ${SEED_MODE:-none}
+      DEMO_USER_SWITCHER: ${DEMO_USER_SWITCHER:-true}
+      NODE_ENV: production
+      PORT: "9361"
+    ports:
+      # Host port 9361 for the Cloudflare tunnel (point it at http://localhost:9361).
+      # Use "127.0.0.1:9361:9361" to keep it off the public interface.
+      - "127.0.0.1:9361:9361"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9361/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  baf1_pgdata:

@@ -1,0 +1,38 @@
+{
+  "name": "baf1-launch-accelerator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BAF-1 AI New Product Launch Accelerator: Nestle Vietnam AI Reinvention demo",
+  "scripts": {
+    "dev": "next dev -p 9361",
+    "build": "next build",
+    "start": "next start -p 9361",
+    "typecheck": "tsc --noEmit",
+    "test:int": "vitest run tests/e2e.int.test.ts",
+    "mock:claude": "node tests/mock-claude.mjs",
+    "test": "vitest run",
+    "db:local:start": "bash scripts/pg-local.sh start",
+    "db:local:stop": "bash scripts/pg-local.sh stop",
+    "db:local:reset": "bash scripts/pg-local.sh reset",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:setup": "npm run db:migrate && npm run db:seed"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
+    "next": "15.1.6",
+    "pg": "^8.23.1",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.7",
+    "@types/pg": "8.11.10",
+    "@types/react": "19.0.7",
+    "@types/react-dom": "19.0.3",
+    "tsx": "4.19.2",
+    "typescript": "5.7.3",
+    "vitest": "2.1.8"
+  }
+}
