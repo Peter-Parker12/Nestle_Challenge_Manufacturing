@@ -1,6 +1,7 @@
 import { HttpError } from "./auth";
 import { q, q1, tx } from "./db";
 import { buildTemplate, csvOf, MAX_BYTES, parseHistory, templateColumns, type ImportConfig, type ImportOptions, type Issue, type ParsedLaunch } from "./importer";
+import { writeFieldValue, displayValue, rowValue } from "./fieldValues";
 import { loadCategoryConfig } from "./repo";
 
 async function config(categoryId: string): Promise<ImportConfig & { lines: Map<string, string>; name: string }> {
@@ -88,10 +89,7 @@ export async function commitLoad(userId: string, loadId: string, opts: { skipInv
     try {
       const code = await tx({ userId, reason: `Historical import ${loadId.slice(0, 8)}` }, async (c) => {
         const p = (await c.query("insert into core.product(category_id,code,name,external_ref) values ($1,$2,$3,$4) returning id", [meta.categoryId, l.ref, l.productName, `import:${loadId}`])).rows[0];
-        for (const [k, v] of Object.entries(l.attrs)) {
-          const def = cfg.attrDefs.find((a) => a.code === k)!;
-          await c.query("insert into core.product_attribute_value(product_id,attribute_def_id,value_num,value_choice) values ($1,$2,$3,$4)", [p.id, attrId.get(k), def.type === "numeric" ? v : null, def.type === "choice" ? v : null]);
-        }
+        for (const [k, v] of Object.entries(l.attrs)) await writeFieldValue(c, p.id, cfg.attrDefs.find((a) => a.code === k)!, v);
         for (const [k, s] of Object.entries(l.specs)) await c.query("insert into core.product_spec values ($1,$2,$3,$4)", [p.id, testId.get(k), s.min, s.max]);
         const launch = (await c.query(
           "insert into core.launch_project(product_id,line_id,objective,status,created_by,created_at) values ($1,$2,$3,'Draft',$4,$5) returning id, code",
@@ -146,7 +144,7 @@ export async function exportHistory(categoryId: string): Promise<string> {
      where p.category_id=$1 and l.status in ('Closed','Cancelled') order by l.created_at, l.code`, [categoryId]);
   const rows: Record<string, string | number | null>[] = [];
   for (const l of launches) {
-    const attrs = await q("select a.code, v.value_num, v.value_choice from core.product_attribute_value v join cfg.attribute_def a on a.id=v.attribute_def_id where v.product_id=$1", [l.pid]);
+    const attrs = await q("select a.code, a.data_type, v.value_num, v.value_choice, v.value_text, v.value_date, v.value_bool from core.product_attribute_value v join cfg.attribute_def a on a.id=v.attribute_def_id where v.product_id=$1", [l.pid]);
     const specs = await q("select t.code, s.spec_min, s.spec_max from core.product_spec s join cfg.quality_test_def t on t.id=s.quality_test_def_id where s.product_id=$1", [l.pid]);
     const runs = await q("select * from core.trial_run where launch_id=$1 order by run_no", [l.id]);
     for (const [i, r] of runs.entries()) {
@@ -159,7 +157,7 @@ export async function exportHistory(categoryId: string): Promise<string> {
         ta_decision: i === runs.length - 1 ? l.ta_decision ?? "" : "", ta_date: i === runs.length - 1 && l.ta_date ? new Date(l.ta_date).toISOString().slice(0, 10) : "",
       };
       if (i === 0) {
-        for (const a of attrs) row[`attr_${a.code}`] = a.value_num !== null ? Number(a.value_num) : a.value_choice;
+        for (const a of attrs) { const v = rowValue(a); if (v !== undefined) row[`attr_${a.code}`] = typeof v === "boolean" ? displayValue(v) : v; }
         for (const s of specs) { row[`spec_${s.code}_min`] = s.spec_min !== null ? Number(s.spec_min) : ""; row[`spec_${s.code}_max`] = s.spec_max !== null ? Number(s.spec_max) : ""; }
       }
       for (const p of params) if (p.actual !== null) row[`param_${p.code}`] = Number(p.actual);

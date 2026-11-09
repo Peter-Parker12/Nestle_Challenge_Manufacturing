@@ -1,15 +1,23 @@
-export const ENGINE_VERSION = "baf1-engine-1.0.0";
+export const ENGINE_VERSION = "baf1-engine-1.1.0";
 
 export type AttrDef = {
   id: string;
   code: string;
   name: string;
   unit: string | null;
-  type: "numeric" | "choice";
+  type: "numeric" | "choice" | "boolean" | "text" | "date";
   choices?: string[] | null;
   required: boolean;
   absMin: number | null;
   absMax: number | null;
+  /** matching = drives the similarity search. info = shown and stored, never used for matching. */
+  kind?: "matching" | "info";
+  helpText?: string | null;
+  section?: string | null;
+  sortOrder?: number;
+  status?: "Draft" | "Active" | "Retired";
+  /** false = never sent to Claude */
+  aiVisible?: boolean;
 };
 
 export type ParamDef = {
@@ -24,7 +32,7 @@ export type ParamDef = {
   stepSeq: number;
 };
 
-export type Attrs = Record<string, number | string>;
+export type Attrs = Record<string, number | string | boolean>;
 
 /** A closed launch used as evidence. */
 export type HistLaunch = {
@@ -56,14 +64,14 @@ export type SmeRule = {
   message: string;
 };
 export type RuleCondition =
-  | { attr: string; op: ">" | ">=" | "<" | "<=" | "=="; value: number | string }
+  | { attr: string; op: ">" | ">=" | "<" | "<=" | "=="; value: number | string | boolean }
   | { all: RuleCondition[] };
 
 export type Severity = "Low" | "Medium" | "High";
 export type Confidence = "High" | "Medium" | "Low";
 
 export type RiskFlag = {
-  type: "low_evidence" | "rework_history" | "out_of_range" | "spread" | "sme_rule" | "clipped";
+  type: "low_evidence" | "rework_history" | "out_of_range" | "spread" | "sme_rule" | "clipped" | "missing_data";
   severity: Severity;
   message: string;
   detail?: Record<string, unknown>;
@@ -76,6 +84,8 @@ export type Neighbour = {
   similarity: number;
   rank: number;
   wasGood: boolean; // reached acceptance on the first run
+  /** share of the weighted fields that both products have a value for (1 = all) */
+  coverage: number;
 };
 
 export type RecLine = {
@@ -97,6 +107,9 @@ export type RecResult = {
   overallRisk: Severity;
   nMatched: number;
   meanSimilarity: number;
+  meanCoverage: number;
+  /** matching fields left out of the comparison, with the reason */
+  ignoredFields: { code: string; name: string; reason: string }[];
   normalisedWeights: { attributes: Record<string, number>; parameters: Record<string, number> };
 };
 
@@ -111,4 +124,6 @@ export type RecInput = {
   rules: SmeRule[];
   topN: number;
   minMatched: number;
+  /** a matching field is only used when at least this share of past launches has a value (default 0.3) */
+  minFieldCoverage?: number;
 };

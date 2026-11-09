@@ -4,10 +4,12 @@
 
 | Level | Command | Count | What it covers |
 |---|---|---|---|
-| Unit | `npm test` | 60 | Weights scale and layering, similarity, windows, clipping, confidence, every risk flag, expert rules, run outcome rules, AI output checks, CSV parsing and every import validation rule |
+| Unit | `npm test` | 80 | Weights scale and layering, similarity, windows, clipping, confidence, every risk flag, expert rules, run outcome rules, AI output checks, CSV parsing, every import validation rule, custom fields and missing-value handling |
 | Type check | `npm run typecheck` | – | Whole project, strict mode |
 | End to end | `API_BASE=http://localhost:9361 npm run test:int` | 20 | Full launch lifecycle through the HTTP API against a real PostgreSQL: roles, validation, recommendation, weights, decisions, runs, rules BR-02 to BR-15, audit, KPIs, fallback without a key |
-| Database rules | manual SQL (below) | 11 | Rules hold when the application is bypassed |
+| Process setup end to end | `API_BASE=… npx vitest run tests/process.int.test.ts` | 9 | Permissions, validation, capability limits, the no-history flag, edit restrictions, critical test fails a run, retirement, field history, audit (needs a freshly seeded database) |
+| Custom fields end to end | `API_BASE=… npx vitest run tests/fields.int.test.ts` | 10 | Field lifecycle, permissions, back-fill, activation, weights, sparse-field handling, edit restrictions, retirement, audit (needs a freshly seeded database) |
+| Database rules | manual SQL (below) | 11 + 5 | Rules hold when the application is bypassed |
 | Claude code paths | mock API (below) | 5 features | Validation, citations, number checks, tool loop, extraction approval |
 | Pages | headless browser | 3 screens | Dashboard, launch (empty and with a recommendation) render without errors |
 | Build | `npm run build` | – | Production build |
@@ -21,6 +23,12 @@ The end-to-end suite writes to the database. Reseed afterwards: `npx tsx scripts
 Export the 60 seeded launches, wipe the database to the reference setup, import the file, export again: the two files are **byte-identical** (17,430 bytes), and the recommendation for the same new product is identical (same windows, start values, similarity scores). A deliberately broken file (unknown line, setting out of range) was refused with the exact rows reported, commit without skipping returned 409, commit with skipping imported 58 and skipped 2, and an R&D user was refused.
 
 This test found and fixed a real bug: `date` columns were converted through the server time zone, shifting acceptance dates by one day on export.
+
+## Private fields never reach Claude
+
+`tests/mock-claude.mjs` can record every request it receives (`MOCK_LOG=file node tests/mock-claude.mjs`). With the app pointed at it, two text fields were created (one private by default with the value `SECRET-ABC`, one shared with `SHARED-XYZ`), back-filled onto the whole history, and the explanation, history question and form-filling features were run. Result: the shared value reached the explanation and the history lookup (positive control); the private value and the private field's name and label appeared in **no** explanation or history request and in no form-filling schema. The private string appeared once, in the form-filling call, only because the test typed it into the free-text description itself, which is the user's own input.
+
+This is a manual check, not part of `npm test`.
 
 ## Database rule checks (run directly in `psql`, bypassing the app)
 

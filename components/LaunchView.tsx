@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, badge } from "./api";
 import { can, type Role } from "@/lib/permissions";
 import { LEVEL_LABELS } from "@/lib/engine/weights";
+import { showValue } from "./FieldInput";
 
 type Msg = { kind: "err" | "ok" | "info" | "warn"; text: string } | null;
 const STEPS = ["Draft", "Recommended", "Approved", "Trial running", "Results entered", "Closed"];
@@ -64,7 +65,7 @@ export default function LaunchView({ id, role }: { id: string; role: Role }) {
         <h2>Product</h2>
         <div className="form-grid">
           {d.attrDefs.map((a: any) => (
-            <div key={a.code}><div className="small muted">{a.name}</div><div>{d.attrs[a.code] ?? "–"} {a.unit ?? ""}</div></div>
+            <div key={a.code}><div className="small muted">{a.name}{(a.kind ?? "matching") === "info" && <span className="badge b-gray" style={{ marginLeft: 6 }}>info</span>}</div><div style={{ whiteSpace: "pre-wrap" }}>{showValue(d.attrs[a.code])} {d.attrs[a.code] !== undefined ? a.unit ?? "" : ""}</div></div>
           ))}
         </div>
         <h3>Quality targets</h3>
@@ -86,7 +87,7 @@ export default function LaunchView({ id, role }: { id: string; role: Role }) {
             </button>
           )}
         </div>
-        {!latestRec && <p className="muted">No recommendation yet. It uses {d.attrDefs.length} product attributes, the weights above, and every accepted launch in this category.</p>}
+        {!latestRec && <p className="muted">No recommendation yet. It uses the product fields marked for matching, the weights above, and every accepted launch in this category.</p>}
         {latestRec && <RecView d={d} rec={latestRec} id={id} role={role} busy={busy} act={act} aiOn={aiOn} paramName={paramName} open={open} />}
         {d.recommendations.length > 1 && (
           <details style={{ marginTop: 12 }}>
@@ -169,7 +170,7 @@ function WeightsPanel({ d, id, role, busy, act }: any) {
       <summary style={{ cursor: "pointer", fontWeight: 600 }}>Weights: what counts as “similar” and what matters most</summary>
       <p className="small muted">0 means ignore, 5 means critical. Category defaults are set by the category owner. Changes for this recipe need a reason.</p>
       <h3>Product attributes (which past launches are similar)</h3>
-      <div className="form-grid">{d.attrDefs.map((a: any) => row("attributes", a.code, a.name))}</div>
+      <div className="form-grid">{d.attrDefs.filter((a: any) => (a.kind ?? "matching") === "matching" && ["numeric", "choice", "boolean"].includes(a.type) && d.weights.levels.attributes[a.code] !== undefined).map((a: any) => row("attributes", a.code, a.name))}</div>
       <h3>Process parameters (how tight the window is)</h3>
       <div className="form-grid">{d.paramDefs.map((p: any) => row("parameters", p.code, p.name))}</div>
       {criticals > 2 && <div className="msg warn">More than two items are Critical. When everything is critical, nothing stands out.</div>}
@@ -493,7 +494,7 @@ function ImportPanel({ d, id, aiOn, reload }: any) {
     const r = await api(`/api/ai/extractions/${ex.extractionId}/${ok ? "approve" : "reject"}`, { method: "POST" });
     setBusy(false);
     if (!r.ok) return setMsg({ kind: "err", text: r.message ?? "Failed" });
-    setMsg({ kind: "ok", text: ok ? "Run created from the report. Review it below." : "Extraction rejected." });
+    setMsg({ kind: "ok", text: ok ? `Run created from the report${r.data.fieldsFilled ? `, and ${r.data.fieldsFilled} empty product field(s) filled` : ""}. Review it below.` : "Extraction rejected." });
     setEx(null); reload();
   }
   return (
@@ -511,6 +512,7 @@ function ImportPanel({ d, id, aiOn, reload }: any) {
             <div className="tw"><table><thead><tr><th>Field</th><th>Value</th><th>Quote from the document</th></tr></thead><tbody>
               {ex.output.parameters.map((p: any) => <tr key={p.code}><td>{p.code}</td><td>{p.actual}</td><td className="small muted">{p.source_quote ?? ""}</td></tr>)}
               {ex.output.quality.map((p: any) => <tr key={p.code}><td>{p.code}</td><td>{p.value}</td><td className="small muted">{p.source_quote ?? ""}</td></tr>)}
+              {(ex.output.product_fields ?? []).map((p: any) => <tr key={"f" + p.code}><td>{p.code} <span className="badge b-gray">product field</span></td><td>{String(p.value)}</td><td className="small muted">{p.source_quote ?? ""}</td></tr>)}
               {ex.output.loss_kg != null && <tr><td>loss_kg</td><td>{ex.output.loss_kg}</td><td /></tr>}
             </tbody></table></div>
           ) : <div className="msg err">Claude's answer could not be used.</div>}

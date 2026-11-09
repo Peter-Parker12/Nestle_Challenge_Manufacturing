@@ -2,8 +2,9 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/components/api";
+import { bySection, FieldInput } from "@/components/FieldInput";
 
-type Attr = { code: string; name: string; unit: string | null; type: "numeric" | "choice"; choices?: string[]; required: boolean; absMin: number | null; absMax: number | null };
+type Attr = { code: string; name: string; unit: string | null; type: string; choices?: string[]; required: boolean; absMin: number | null; absMax: number | null; kind?: string; helpText?: string | null; section?: string | null };
 type Test = { code: string; name: string; unit: string | null; is_critical: boolean };
 
 export default function NewLaunch() {
@@ -60,7 +61,7 @@ export default function NewLaunch() {
     for (const d of attrDefs) {
       const v = attrs[d.code];
       if (v === undefined || v === "") continue;
-      a[d.code] = d.type === "numeric" ? Number(v) : v;
+      a[d.code] = d.type === "numeric" ? Number(v) : v; // yes/no, dates and text go as typed; the server validates every type
     }
     const s: Record<string, { min: number | null; max: number | null }> = {};
     for (const [k, v] of Object.entries(specs)) if (v.min !== "" || v.max !== "") s[k] = { min: v.min === "" ? null : Number(v.min), max: v.max === "" ? null : Number(v.max) };
@@ -96,21 +97,14 @@ export default function NewLaunch() {
           <div className="field"><label htmlFor="ob">Objective</label><input id="ob" value={objective} onChange={(e) => setObjective(e.target.value)} /></div>
         </div>
         <h3>Attributes</h3>
-        <div className="form-grid">
-          {attrDefs.map((d) => (
-            <div className="field" key={d.code}>
-              <label htmlFor={`a-${d.code}`}>{d.name}{d.unit ? ` (${d.unit})` : ""}{d.required ? " *" : ""}</label>
-              {d.type === "choice" ? (
-                <select id={`a-${d.code}`} value={attrs[d.code] ?? ""} onChange={(e) => setAttrs({ ...attrs, [d.code]: e.target.value })}>
-                  <option value="">Select…</option>{d.choices?.map((c) => <option key={c}>{c}</option>)}
-                </select>
-              ) : (
-                <input id={`a-${d.code}`} type="number" step="any" min={d.absMin ?? undefined} max={d.absMax ?? undefined} value={attrs[d.code] ?? ""} onChange={(e) => setAttrs({ ...attrs, [d.code]: e.target.value })} />
-              )}
-              {d.type === "numeric" && d.absMin !== null && <div className="small muted">Allowed {d.absMin} to {d.absMax}</div>}
+        {bySection(attrDefs).map((g) => (
+          <div key={g.section ?? "_"}>
+            {g.section && <div className="eyebrow" style={{ marginTop: 14 }}>{g.section}</div>}
+            <div className="form-grid">
+              {g.items.map((d) => <FieldInput key={d.code} id={`a-${d.code}`} def={d} value={attrs[d.code] ?? ""} onChange={(v) => setAttrs({ ...attrs, [d.code]: v })} />)}
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
 
       <div className="card">

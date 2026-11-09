@@ -5,21 +5,27 @@ import { deriveRunResult } from "./engine/outcome";
 import { recommend, smeRuleFromRow } from "./engine/recommend";
 import { ENGINE_VERSION, type AttrDef, type Attrs, type HistLaunch, type LineCaps, type ParamDef, type RecResult, type WeightLevels } from "./engine/types";
 import { resolveLevels, weightWarnings } from "./engine/weights";
+import { isEmpty, parseFieldValue, rowValue, writeFieldValue } from "./fieldValues";
 
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 export const topN = () => Number(process.env.TOP_N_NEIGHBOURS ?? 7);
 export const minMatched = () => Number(process.env.MIN_MATCHED_LAUNCHES ?? 3);
+export const minFieldCoverage = () => Number(process.env.MIN_FIELD_COVERAGE ?? 0.3);
 
 /* ------------------------------------------------------------------ configuration */
-export async function loadCategoryConfig(categoryId: string) {
-  const attrRows = await q("select * from cfg.attribute_def where category_id=$1 order by code", [categoryId]);
+export const mapAttrDef = (a: any): AttrDef => ({
+  id: a.id, code: a.code, name: a.name, unit: a.unit, type: a.data_type, choices: a.choices, required: a.required, absMin: num(a.abs_min), absMax: num(a.abs_max),
+  kind: a.kind, helpText: a.help_text, section: a.section, sortOrder: a.sort_order, status: a.status, aiVisible: a.ai_visible,
+});
+
+/** `all: true` also returns Draft and Retired product fields (for the field editor). Everything else sees Active fields only. */
+export async function loadCategoryConfig(categoryId: string, opts: { all?: boolean } = {}) {
+  const attrRows = await q(`select * from cfg.attribute_def where category_id=$1 ${opts.all ? "" : "and status='Active'"} order by sort_order, code`, [categoryId]);
   const paramRows = await q(
     `select p.*, s.seq as step_seq, s.name as step_name from cfg.parameter_def p join cfg.process_step s on s.id=p.step_id
      where s.category_id=$1 and p.valid_to is null order by s.seq, p.code`, [categoryId]);
-  const testRows = await q("select * from cfg.quality_test_def where category_id=$1 order by code", [categoryId]);
-  const attrDefs: AttrDef[] = attrRows.map((a) => ({
-    id: a.id, code: a.code, name: a.name, unit: a.unit, type: a.data_type, choices: a.choices, required: a.required, absMin: num(a.abs_min), absMax: num(a.abs_max),
-  }));
+  const testRows = await q(`select * from cfg.quality_test_def where category_id=$1 ${opts.all ? "" : "and status='Active'"} order by code`, [categoryId]);
+  const attrDefs: AttrDef[] = attrRows.map(mapAttrDef);
   const paramDefs: ParamDef[] = paramRows.map((p) => ({
     id: p.id, code: p.code, name: p.name, unit: p.unit, absMin: Number(p.abs_min), absMax: Number(p.abs_max), isCritical: p.is_critical, isLocked: p.is_locked, stepSeq: p.step_seq,
   }));
@@ -88,7 +94,7 @@ export async function loadHistory(categoryId: string, asOf: Date, excludeLaunchI
   if (!launches.length) return [];
   const productIds = launches.map((l) => l.product_id);
   const attrRows = await q(
-    `select v.product_id, a.code, a.data_type, v.value_num, v.value_choice from core.product_attribute_value v
+    `select v.product_id, a.code, a.data_type, v.value_num, v.value_choice, v.value_text, v.value_date, v.value_bool from core.product_attribute_value v
      join cfg.attribute_def a on a.id=v.attribute_def_id where v.product_id = any($1::uuid[])`, [productIds]);
   const runIds = launches.map((l) => l.accepted_run).filter(Boolean);
   const paramRows = await q(
@@ -101,7 +107,8 @@ export async function loadHistory(categoryId: string, asOf: Date, excludeLaunchI
   const attrsBy = new Map<string, Attrs>();
   attrRows.forEach((r) => {
     const m = attrsBy.get(r.product_id) ?? {};
-    m[r.code] = r.data_type === "numeric" ? Number(r.value_num) : r.value_choice;
+    const val = rowValue(r);
+    if (val !== undefined) m[r.code] = val;
     attrsBy.set(r.product_id, m);
   });
   const paramsBy = new Map<string, Record<string, number>>();
@@ -133,10 +140,10 @@ export async function listLaunches() {
 
 export async function getProductAttrs(productId: string): Promise<Attrs> {
   const rows = await q(
-    `select a.code, a.data_type, v.value_num, v.value_choice from core.product_attribute_value v
+    `select a.code, a.data_type, v.value_num, v.value_choice, v.value_text, v.value_date, v.value_bool from core.product_attribute_value v
      join cfg.attribute_def a on a.id=v.attribute_def_id where v.product_id=$1`, [productId]);
   const out: Attrs = {};
-  rows.forEach((r) => (out[r.code] = r.data_type === "numeric" ? Number(r.value_num) : r.value_choice));
+  rows.forEach((r) => { const val = rowValue(r); if (val !== undefined) out[r.code] = val; });
   return out;
 }
 
@@ -150,7 +157,7 @@ async function launchCore(launchId: string) {
 
 export async function createLaunch(
   userId: string,
-  input: { categoryId: string; lineId: string; name: string; code?: string; objective?: string; attrs: Attrs; specs: Record<string, { min: number | null; max: number | null }> },
+  input: { categoryId: string; lineId: string; name: string; code?: string; objective?: string; attrs: Record<string, unknown>; specs: Record<string, { min: number | null; max: number | null }> },
 ) {
   const { attrDefs, tests } = await loadCategoryConfig(input.categoryId);
   // Validate attributes against their definitions (required, type, sane range, choice membership).
@@ -158,17 +165,12 @@ export async function createLaunch(
   const clean: Attrs = {};
   for (const a of attrDefs) {
     const v = input.attrs[a.code];
-    if (v === undefined || v === null || v === "") {
+    if (isEmpty(v)) {
       if (a.required) errors.push(`${a.name} is required`);
       continue;
     }
-    if (a.type === "numeric") {
-      const n = Number(v);
-      if (!Number.isFinite(n)) errors.push(`${a.name} must be a number`);
-      else if ((a.absMin !== null && n < a.absMin) || (a.absMax !== null && n > a.absMax)) errors.push(`${a.name} must be between ${a.absMin} and ${a.absMax}`);
-      else clean[a.code] = n;
-    } else if (!a.choices?.includes(String(v))) errors.push(`${a.name} must be one of ${a.choices?.join(", ")}`);
-    else clean[a.code] = String(v);
+    const parsed = parseFieldValue(a, v);
+    if (parsed.ok) clean[a.code] = parsed.value; else errors.push(parsed.message);
   }
   if (!input.name.trim()) errors.push("Product name is required");
   if (errors.length) throw new HttpError(422, errors.join("; "), "validation");
@@ -181,8 +183,7 @@ export async function createLaunch(
     for (const a of attrDefs) {
       const v = clean[a.code];
       if (v === undefined) continue;
-      await c.query("insert into core.product_attribute_value(product_id,attribute_def_id,value_num,value_choice) values ($1,$2,$3,$4)",
-        [p.id, a.id, a.type === "numeric" ? v : null, a.type === "choice" ? v : null]);
+      await writeFieldValue(c, p.id, a, v);
     }
     for (const t of tests) {
       const s = input.specs[t.code];
@@ -205,7 +206,7 @@ async function buildRecInput(launchId: string, override?: WeightLevels) {
   const w = await resolveWeights(l.category_id, launchId, cfg.attrDefs, cfg.paramDefs, override);
   return {
     launch: l, asOf, w, cfg,
-    input: { attrDefs: cfg.attrDefs, paramDefs: cfg.paramDefs, target: attrs, lineId: l.line_id, lineCaps, history, weights: w.levels, rules, topN: topN(), minMatched: minMatched() },
+    input: { attrDefs: cfg.attrDefs, paramDefs: cfg.paramDefs, target: attrs, lineId: l.line_id, lineCaps, history, weights: w.levels, rules, topN: topN(), minMatched: minMatched(), minFieldCoverage: minFieldCoverage() },
   };
 }
 
@@ -225,11 +226,19 @@ export async function createRecommendation(launchId: string, userId: string) {
 
   return tx({ userId }, async (c) => {
     const rec = (await qc(c,
-      `insert into rec.recommendation(launch_id,run_no_target,weight_set_id,weights_snapshot,engine_version,history_as_of,n_matched,confidence,overall_risk,created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
+      `insert into rec.recommendation(launch_id,run_no_target,weight_set_id,weights_snapshot,engine_version,history_as_of,n_matched,confidence,overall_risk,created_by,inputs_snapshot)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
       [launchId, nextRun, b.w.recipeSetId ?? b.w.categorySetId,
         JSON.stringify({ levels: b.w.levels, normalised: result.normalisedWeights, source: b.w.source }),
-        ENGINE_VERSION, b.asOf, result.nMatched, result.confidence, result.overallRisk, userId]))[0];
+        ENGINE_VERSION, b.asOf, result.nMatched, result.confidence, result.overallRisk, userId,
+        // Everything the engine looked at, so the result can be explained later even if field or parameter definitions change.
+        JSON.stringify({
+          target: b.input.target,
+          fields: b.input.attrDefs.map((a) => ({ code: a.code, name: a.name, type: a.type, kind: a.kind ?? "matching", status: a.status ?? "Active", used: !result.ignoredFields.some((f) => f.code === a.code) && (a.kind ?? "matching") === "matching" && ["numeric", "choice", "boolean"].includes(a.type) })),
+          ignoredFields: result.ignoredFields,
+          parameters: b.input.paramDefs.map((p) => ({ code: p.code, name: p.name, unit: p.unit, absMin: p.absMin, absMax: p.absMax, locked: p.isLocked, capability: b.input.lineCaps[p.code] ?? null })),
+          minFieldCoverage: b.input.minFieldCoverage, topN: b.input.topN, minMatched: b.input.minMatched,
+        })]))[0];
     for (const l of result.lines)
       await c.query("insert into rec.recommendation_line values ($1,$2,$3,$4,$5,$6,$7)", [rec.id, pById.get(l.code), l.startValue, l.windowLow, l.windowHigh, l.clipped, l.clipReason ?? null]);
     for (const n of result.neighbours) await c.query("insert into rec.recommendation_evidence values ($1,$2,$3,$4,$5)", [rec.id, n.launchId, n.similarity, n.rank, n.wasGood]);
@@ -329,7 +338,7 @@ export async function enterResults(
   const caps = await loadLineCaps(l.line_id, cfg.paramDefs);
   const specs = await q(
     `select t.id, t.code, t.is_critical, s.spec_min, s.spec_max from cfg.quality_test_def t
-     left join core.product_spec s on s.quality_test_def_id=t.id and s.product_id=$2 where t.category_id=$1`, [l.category_id, l.pid]);
+     left join core.product_spec s on s.quality_test_def_id=t.id and s.product_id=$2 where t.category_id=$1 and t.status='Active'`, [l.category_id, l.pid]);
 
   const errors: string[] = [];
   for (const [code, v] of Object.entries(d.actuals)) {
@@ -425,7 +434,7 @@ export async function getLaunchDetail(launchId: string) {
   const caps = await loadLineCaps(l.line_id, cfg.paramDefs);
   const specs = await q(
     `select t.code, t.name, t.is_critical, s.spec_min, s.spec_max from cfg.quality_test_def t
-     left join core.product_spec s on s.quality_test_def_id=t.id and s.product_id=$2 where t.category_id=$1 order by t.code`, [l.category_id, l.pid]);
+     left join core.product_spec s on s.quality_test_def_id=t.id and s.product_id=$2 where t.category_id=$1 and t.status='Active' order by t.code`, [l.category_id, l.pid]);
   const runs = await q("select * from core.trial_run where launch_id=$1 order by run_no", [launchId]);
   const ids = runs.map((r) => r.id);
   const params = ids.length ? await q("select rp.run_id, p.code, rp.planned, rp.actual from core.run_parameter rp join cfg.parameter_def p on p.id=rp.parameter_def_id where rp.run_id = any($1::uuid[])", [ids]) : [];
@@ -439,6 +448,7 @@ export async function getLaunchDetail(launchId: string) {
   const decisions = recIds.length ? await q("select d.*, u.name as decided_by_name from rec.decision d left join cfg.app_user u on u.id=d.decided_by where d.recommendation_id = any($1::uuid[])", [recIds]) : [];
   const w = await resolveWeights(l.category_id, launchId, cfg.attrDefs, cfg.paramDefs);
   const reasonCodes = await q("select code, label from cfg.reason_code where active order by label");
+  const paramOrder = (code: string) => { const i = cfg.paramDefs.findIndex((p) => p.code === code); return i < 0 ? 999 : i; }; // process order: step, then code
 
   return {
     launch: { id: l.id, code: l.code, status: l.status, objective: l.objective, createdAt: l.created_at, taDecision: l.ta_decision, taDate: l.ta_date, cancelReason: l.cancel_reason, lineId: l.line_id, line: l.line_code, categoryId: l.category_id, category: l.category_name, productName: l.product_name, productCode: l.product_code },
@@ -453,7 +463,7 @@ export async function getLaunchDetail(launchId: string) {
     })),
     recommendations: recs.map((r) => ({
       id: r.id, runNoTarget: r.run_no_target, createdAt: r.created_at, confidence: r.confidence, overallRisk: r.overall_risk, nMatched: r.n_matched, engineVersion: r.engine_version, weights: r.weights_snapshot,
-      lines: lines.filter((x) => x.recommendation_id === r.id).map((x) => ({ code: x.code, startValue: Number(x.start_value), windowLow: Number(x.window_low), windowHigh: Number(x.window_high), clipped: x.clipped, clipReason: x.clip_reason })),
+      lines: lines.filter((x) => x.recommendation_id === r.id).sort((a, b) => paramOrder(a.code) - paramOrder(b.code)).map((x) => ({ code: x.code, startValue: Number(x.start_value), windowLow: Number(x.window_low), windowHigh: Number(x.window_high), clipped: x.clipped, clipReason: x.clip_reason })),
       evidence: ev.filter((x) => x.recommendation_id === r.id).map((x) => ({ launchId: x.evidence_launch_id, code: x.launch_code, productName: x.product_name, similarity: Number(x.similarity), rank: x.rank, wasGood: x.was_good })),
       flags: flags.filter((x) => x.recommendation_id === r.id).map((x) => ({ type: x.flag_type, severity: x.severity, message: x.message, detail: x.detail })),
       decision: decisions.filter((x) => x.recommendation_id === r.id).map((x) => ({ action: x.action, reason: x.reason, finalValues: x.final_values, by: x.decided_by_name, at: x.decided_at }))[0] ?? null,

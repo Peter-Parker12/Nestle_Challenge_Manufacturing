@@ -15,6 +15,8 @@ All data in this repository is **synthetic**. Nothing here is Nestlé data.
 | Weights | Engineers set 0 to 5 importance per attribute and parameter, at platform, category and recipe level, with a reason and an audit trail. Effect can be previewed before saving. |
 | Launch, run, outcome | A product launch holds many trial runs. Run result (Pass, Marginal, Fail) is calculated from quality results, not typed. Reason codes, next step, technical acceptance by QA. |
 | Claude features | Describe a product in words to fill the form; plain-language explanation of a recommendation; ask questions about the history with checked citations; import a trial report (PDF or text); suggested expert rules from failure patterns. |
+| Process setup | Category owners and plant admins manage process steps, parameters, quality tests and per-line capability, with the same retire-never-delete rules. See [docs/PROCESS_SETUP.md](docs/PROCESS_SETUP.md). |
+| Custom product fields | Category owners add fields per category (number, choice, yes/no, text, date), choose whether each affects matching, back-fill values for existing launches, and decide whether Claude may see them. See [docs/CUSTOM_FIELDS.md](docs/CUSTOM_FIELDS.md). |
 | Starting database | **Import history** page: upload previous launches and runs as CSV, with a per-category template, a row-by-row check before anything is saved, and an export in the same format. See [docs/IMPORT_FORMAT.md](docs/IMPORT_FORMAT.md). |
 | Governance | Roles and permissions, append-only audit log, database-enforced business rules, full reproducibility of every recommendation. |
 
@@ -65,9 +67,11 @@ The full click-by-click script is in [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md).
 ## Tests
 
 ```bash
-npm test                                              # 60 unit tests: engine, weights, outcome rules, AI output checks, CSV import rules
+npm test                                              # 80 unit tests: engine, weights, outcome rules, AI output checks, CSV import rules, custom fields, process setup
 npm run typecheck
 API_BASE=http://localhost:9361 npm run test:int       # 20 end-to-end checks (writes to the DB; reseed after)
+API_BASE=http://localhost:9361 npx vitest run tests/fields.int.test.ts   # 10 custom-field checks (needs a freshly seeded DB)
+API_BASE=http://localhost:9361 npx vitest run tests/process.int.test.ts  # 9 process-setup checks (needs a freshly seeded DB)
 ```
 
 To exercise the Claude code paths without a key, run `node tests/mock-claude.mjs` and start the app with
@@ -78,6 +82,8 @@ To exercise the Claude code paths without a key, run `node tests/mock-claude.mjs
 | Document | Contents |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, design decisions |
+| [docs/PROCESS_SETUP.md](docs/PROCESS_SETUP.md) | Parameters, quality tests and line capability: rules and what a new one means for recommendations |
+| [docs/CUSTOM_FIELDS.md](docs/CUSTOM_FIELDS.md) | Product fields: kinds, lifecycle, rules, missing values, back-fill, AI handling |
 | [docs/IMPORT_FORMAT.md](docs/IMPORT_FORMAT.md) | Loading historical data: file format, rules, export |
 | [docs/DATA_MODEL.md](docs/DATA_MODEL.md) | Schemas, tables, constraints, what the engine and Claude read |
 | [docs/BUSINESS_RULES.md](docs/BUSINESS_RULES.md) | Every rule, where it is enforced, how it is tested |
@@ -87,6 +93,10 @@ To exercise the Claude code paths without a key, run `node tests/mock-claude.mjs
 | [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | Presentation walk-through |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | Operating the deployment |
 | [docs/PRODUCTION_GAPS.md](docs/PRODUCTION_GAPS.md) | What must change before a real pilot |
+
+## Look and feel
+
+The interface follows the Workforce Solution brand: Deep Navy sidebar and highlight panel, Cobalt actions, Electric Teal accents, Vermilion for errors, Montserrat headings and Poppins text, with the Workforce Solution logo. The tokens are at the top of `app/globals.css`. Text-sized teal, cobalt and vermilion are darkened one step so they stay readable on white; the brand values are used for fills. The logo and favicon files in `public/brand` and `app/icon.png` come from the Workforce Solution website project. The Nestlé name appears only as the programme this demo is prepared for; no Nestlé branding is used.
 
 ## Honest status
 

@@ -4,6 +4,7 @@
 // It returns canned tool calls that include deliberate mistakes (a wrong number, a fake citation, an out-of-range value)
 // so the server-side guardrails can be seen working.
 import http from "node:http";
+import fs from "node:fs";
 
 const text = (c) => (typeof c === "string" ? c : JSON.stringify(c));
 const reply = (content, stop = "end_turn") => ({
@@ -15,6 +16,7 @@ http.createServer((req, res) => {
   let raw = "";
   req.on("data", (d) => (raw += d));
   req.on("end", () => {
+    if (process.env.MOCK_LOG) fs.appendFileSync(process.env.MOCK_LOG, raw + "\n"); // record every request, to inspect what a prompt contains
     const body = raw ? JSON.parse(raw) : {};
     const tool = body.tool_choice?.type === "tool" ? body.tool_choice.name : null;
     const all = text(body.messages);
@@ -31,6 +33,7 @@ http.createServer((req, res) => {
       out = reply([{ type: "tool_use", id: "t1", name: tool, input: {
         parameters: [{ code: "homog_pressure_bar", actual: 205, source_quote: "Homogenizer 205 bar" }, { code: "uht_temp_c", actual: 140.5 }, { code: "hold_time_s", actual: 4.7 }, { code: "fill_temp_c", actual: 22 }, { code: "flow_rate_lph", actual: 4650 }],
         quality: [{ code: "viscosity_cp", value: 38.4 }, { code: "sediment_pct", value: 0.31 }, { code: "creaming_idx", value: 1.2 }, { code: "ph", value: 6.7 }],
+        product_fields: [{ code: "pack_type", value: "pouch", source_quote: "Packed in pouches" }, { code: "organic", value: "maybe", source_quote: "organic?" }],
         loss_kg: 75, notes: "Imported" } }], "tool_use");
     else if (tool === "propose_rules")
       out = reply([{ type: "tool_use", id: "t1", name: tool, input: { rules: [{ attr: "fat_pct", op: ">", value: 2.8, severity: "Medium", message: "Fat above 2.8%: more rework seen.", rationale: "Rework rate rises in the top band.", evidence_codes: ["L-1001", "L-1002"] }] } }], "tool_use");

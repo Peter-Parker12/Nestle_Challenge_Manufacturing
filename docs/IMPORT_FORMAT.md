@@ -9,7 +9,7 @@ A new deployment needs the reference setup first (users, lines, categories, para
 | Step | How |
 |---|---|
 | 1. Load the reference setup only | Set `SEED_MODE=config` in `.env` before the first start. Locally: `npx tsx scripts/seed.ts --force --config-only` |
-| 2. Replace the sample parameters, lines and limits with Nestlé's | The reference setup describes a sample UHT drinks category and a sample sauces category. Real definitions are changed in `scripts/seed.ts` or with SQL on the `cfg` tables. There is no admin screen for this yet (see `PRODUCTION_GAPS.md`). |
+| 2. Replace the sample parameters and limits with Nestlé's, using **Process setup** and **Product fields** | The reference setup describes a sample UHT drinks category and a sample sauces category. Product fields, process steps, parameters, quality tests and per-line capability are managed on their screens (`CUSTOM_FIELDS.md`, `PROCESS_SETUP.md`). Creating a new category or line, and the reason-code list, still need the seed or SQL (see `PRODUCTION_GAPS.md`). |
 | 3. Open **Import history**, download the template for the category, fill it in | See below |
 | 4. Check the file, fix problems, import | Nothing is saved until you confirm |
 
@@ -35,7 +35,7 @@ The columns are generated for each category, so download the template for the ca
 | `notes` | no | |
 | `ta_decision` | last run | Accepted, Accepted with conditions or Rejected |
 | `ta_date` | no | `YYYY-MM-DD`. Defaults to the last run date |
-| `attr_<code>` | first row of each launch | One column per product attribute (fat, solids, viscosity, base…). Required ones must be filled |
+| `attr_<code>` | first row of each launch | One column per **active** product field (fat, solids, viscosity, base, and any custom field). Required ones must be filled. Values follow the field type: numbers, one of the options, yes/no, text up to 500 characters, or a date |
 | `param_<code>` | per run | The setting actually used in that run |
 | `q_<code>` | per run | Quality test result |
 | `spec_<code>_min`, `spec_<code>_max` | first row of each launch | Quality target for the product |

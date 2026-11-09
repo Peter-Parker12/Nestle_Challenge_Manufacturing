@@ -34,6 +34,33 @@ Rule numbers follow the BA specification. Status: **Done**, **Partial**, or **No
 | Importing a report never writes data until a person approves, and then goes through the normal results path so all rules apply | App `approveExtraction` |
 | AI output must pass schema validation; cited launch codes must exist in what the model was given; numbers not in the data are flagged | App `lib/ai` |
 
+## Product field rules
+
+| Rule | Enforced in | Tested by |
+|---|---|---|
+| Only the category owner adds, edits, activates or retires fields | App `requireRole("manageFields")` | e2e "only the category owner defines fields" |
+| Fields are retired, never deleted | DB trigger | direct SQL test |
+| Code and type are fixed once products have values | DB trigger | direct SQL test |
+| Text and date fields cannot affect matching | DB check constraint, app | direct SQL test; unit |
+| New matching fields start at weight 0 | App | e2e "starts as a Draft with weight 0" |
+| A matching field takes part only when at least 30% of history has a value | Engine | unit "ignores a matching field that too little of the history has"; e2e "a sparse field is left out" |
+| A missing value never makes a launch look closer; coverage lowers similarity and confidence | Engine | unit "missing values never make a launch look closer" |
+| Choice options can only grow, ranges only widen, units are fixed once values exist | App | e2e "editing is restricted once products hold values" |
+| Back-fill writes only filled cells, all or nothing, never touches run data, and is audited | App `backfill`, DB audit trigger | e2e "back-fills values for existing launches" |
+| Fields marked not AI visible are never sent to Claude | App `lib/ai/features.ts` | manual check with the recording mock (see `TEST_PLAN.md`): the private value and name appeared in no explanation or history request |
+
+## Process setup rules
+
+| Rule | Enforced in | Tested by |
+|---|---|---|
+| Only category owners and plant admins change parameters, tests and line capability | App `requireRole("manageProcess")` | e2e "is changed only by category owners and plant admins" |
+| Parameters and tests are retired with a reason, never deleted | App, DB trigger | e2e "retires a parameter and a test…"; direct SQL test |
+| Code and unit are fixed once runs or results reference them | DB trigger | direct SQL test |
+| A parameter code is unique across the category | App | e2e "adds a parameter, validates it…" |
+| Ranges can only be widened once runs have values; capability stays inside the range | App, DB check | e2e "limits can be widened but not narrowed…"; "sets line capability inside the allowed range" |
+| A parameter with no history is flagged and its window stays inside line capability | Engine | e2e "a parameter with no history is flagged…" |
+| A critical quality test out of spec fails the run | Engine | e2e "adds a quality test that decides pass or fail" |
+
 ## Import rules
 
 | Rule | Enforced in | Tested by |

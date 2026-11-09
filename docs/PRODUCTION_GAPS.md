@@ -28,7 +28,7 @@ The demo is built with production-style practices, but it is a demo. This list i
 | Pagination | Launch list is capped at 200 rows; history queries load all closed launches in a category (fine for hundreds, review at thousands). |
 | Accessibility audit | Labels and focus states are present; no formal audit. |
 | Vietnamese interface | English only. |
-| Admin screens | Categories, parameters, attributes, quality tests, lines, reason codes and users are changed through SQL or the seed, not a screen. Only default weights and rules have a screen. This is the biggest gap for loading real history, because the file can only use definitions that already exist. |
+| Admin screens | **Product fields** and **Process setup** (steps, parameters, quality tests, line capability) now have screens. Still SQL or the seed: creating categories and lines, reason codes, users, and moving a parameter between steps. A history file can only use definitions that exist, so set these up before importing. |
 
 ## Known limitations of the method
 

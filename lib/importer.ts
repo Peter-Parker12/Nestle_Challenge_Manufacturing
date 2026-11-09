@@ -1,6 +1,7 @@
 import { deriveRunResult, type QualityIn, type RunResult } from "./engine/outcome";
 import type { AttrDef, ParamDef } from "./engine/types";
 import { parseCsv, toCsv } from "./csv";
+import { isEmpty, parseFieldValue, type FieldValue } from "./fieldValues";
 
 /**
  * Historical launch import.
@@ -43,7 +44,7 @@ export type ParsedLaunch = {
   productName: string;
   lineCode: string;
   createdDate: string;
-  attrs: Record<string, number | string>;
+  attrs: Record<string, FieldValue>;
   specs: Record<string, { min: number | null; max: number | null }>;
   runs: ParsedRun[];
   taDecision: "Accepted" | "Accepted with conditions" | "Rejected" | null;
@@ -74,7 +75,8 @@ export function buildTemplate(cfg: Pick<ImportConfig, "attrDefs" | "paramDefs" |
       launch_ref: ref, product_name: "Example product (replace)", line: lineCode, created_date: "2025-03-01", run_no: runNo, run_date: `2025-03-${String(runNo * 5).padStart(2, "0")}`,
       result: last ? "Pass" : "Fail", loss_kg: last ? 80 : 240, reason_codes: last ? "" : "sedimentation", notes: last ? "Stable" : "Sediment high", ta_decision: last ? "Accepted" : "", ta_date: last ? "2025-03-20" : "",
     };
-    for (const a of cfg.attrDefs) v[`attr_${a.code}`] = a.type === "numeric" ? Math.round(((a.absMin ?? 0) + (a.absMax ?? 10)) / 2) : a.choices?.[0] ?? "";
+    for (const a of cfg.attrDefs)
+      v[`attr_${a.code}`] = a.type === "numeric" ? Math.round(((a.absMin ?? 0) + (a.absMax ?? 10)) / 2) : a.type === "choice" ? a.choices?.[0] ?? "" : a.type === "boolean" ? "yes" : a.type === "date" ? "2025-01-01" : "";
     for (const p of cfg.paramDefs) v[`param_${p.code}`] = Math.round(((p.absMin + p.absMax) / 2) * 10) / 10;
     for (const t of cfg.tests) { v[`q_${t.code}`] = ""; v[`spec_${t.code}_min`] = ""; v[`spec_${t.code}_max`] = ""; }
     return cols.map((c) => v[c] ?? "");
@@ -152,17 +154,12 @@ export function parseHistory(csvText: string, cfg: ImportConfig, opt: ImportOpti
     if (createdDate && !isDate(createdDate)) { E(fr, "created_date", `"${createdDate}" is not a date. Use YYYY-MM-DD.`); createdDate = ""; }
 
     // attributes
-    const attrs: Record<string, number | string> = {};
+    const attrs: Record<string, FieldValue> = {};
     for (const a of cfg.attrDefs) {
       const raw = get(f, `attr_${a.code}`);
-      if (raw === "") { if (a.required) E(fr, `attr_${a.code}`, `${a.name} is required`); continue; }
-      if (a.type === "numeric") {
-        const v = num(raw);
-        if (v === null || !Number.isFinite(v)) E(fr, `attr_${a.code}`, `${a.name}: "${raw}" is not a number`);
-        else if ((a.absMin !== null && v < a.absMin) || (a.absMax !== null && v > a.absMax)) E(fr, `attr_${a.code}`, `${a.name} ${v} is outside the allowed range ${a.absMin} to ${a.absMax}`);
-        else attrs[a.code] = v;
-      } else if (!a.choices?.includes(raw)) E(fr, `attr_${a.code}`, `${a.name}: "${raw}" is not one of ${a.choices?.join(", ")}`);
-      else attrs[a.code] = raw;
+      if (isEmpty(raw)) { if (a.required) E(fr, `attr_${a.code}`, `${a.name} is required`); continue; }
+      const parsed = parseFieldValue(a, raw);
+      if (parsed.ok) attrs[a.code] = parsed.value; else E(fr, `attr_${a.code}`, parsed.message);
     }
     // later rows should repeat the same product data; flag differences
     for (const { r, n } of g.rows.slice(1)) {

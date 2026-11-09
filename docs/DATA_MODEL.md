@@ -33,9 +33,9 @@ Product (SKU)  ──<  Launch project  ──<  Trial run  ──<  readings, q
 |---|---|
 | `category` | Product category, for example `UHT_DRINK`. Has an owner. |
 | `process_step`, `parameter_def` | Parameters have unit, absolute min and max, `is_critical`, `is_locked` (locked limits are never weighted down), and a version. |
-| `attribute_def` | Numeric or choice, required flag, allowed range. Drives form validation and similarity. |
-| `quality_test_def` | Tests with a critical flag. Critical tests decide run failure. |
-| `line_capability` | Per line and parameter, the allowed range. Windows are clipped to this. |
+| `attribute_def` | A product field. Type (number, choice, yes/no, text, date), `kind` (matching or info), required flag, allowed range or options, help text, section, order, `status` (Draft, Active, Retired), `ai_visible`. Drives forms, validation, imports and similarity. Never deleted. See `CUSTOM_FIELDS.md` |
+| `quality_test_def` | Tests with a critical flag (critical tests decide run failure), status (Active or Retired) and help text. Never deleted |
+| `line_capability` | Per line and parameter, the range the line can run, inside the parameter's allowed range. Windows are clipped to this. Audited |
 | `sme_rule` | Condition as JSON (`{"attr":"fat_pct","op":">","value":2.5}`), severity, message, status, approver. |
 | `reason_code` | Fixed list of failure reasons. |
 
@@ -43,7 +43,7 @@ Product (SKU)  ──<  Launch project  ──<  Trial run  ──<  readings, q
 
 | Table | Key columns and rules |
 |---|---|
-| `product_attribute_value` | One row per product and attribute. Numeric or choice value. |
+| `product_attribute_value` | One row per product and field, in the typed column that matches the field: `value_num`, `value_choice`, `value_text` (max 500), `value_date`, `value_bool`. Audited |
 | `product_spec` | Spec min and max per quality test, per product. |
 | `launch_project` | `code` (L-1000…), `status`, `ta_decision`, `ta_date`, `closed_at`. |
 | `trial_run` | `run_no` unique per launch. `status`, `result`, `result_notes`, override fields, `loss_kg`, `next_step`, `plan_rec_id` (the recommendation followed). A check constraint requires a reason when the result is overridden. |
@@ -56,7 +56,7 @@ Product (SKU)  ──<  Launch project  ──<  Trial run  ──<  readings, q
 | Table | Notes |
 |---|---|
 | `weight_set`, `weight_item` | Levels `platform`, `category`, `recipe`. Weight 0 to 5. Sets are replaced by a new set that `supersedes` the old one. Items are immutable. |
-| `recommendation` | Stores `weights_snapshot` (exact levels, normalised weights, source), `engine_version`, `history_as_of`, `n_matched`, `confidence`, `overall_risk`. |
+| `recommendation` | Also stores `inputs_snapshot`: the product values, fields used or left out, parameter limits and capability, and thresholds the engine saw. Stores `weights_snapshot` (exact levels, normalised weights, source), `engine_version`, `history_as_of`, `n_matched`, `confidence`, `overall_risk`. |
 | `recommendation_line` | Start value and window per parameter, clipped flag and reason. |
 | `recommendation_evidence` | Launches used, similarity, rank, whether they passed on the first run. |
 | `risk_flag` | Type, severity, message, detail JSON, optional expert rule. |

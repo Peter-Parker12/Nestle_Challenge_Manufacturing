@@ -48,6 +48,28 @@ All errors return `{ "error": "<code>", "message": "<text>" }`.
 | `POST /api/launches/{id}/ta` | QA | `{decision: Accepted|Accepted with conditions|Rejected}` |
 | `POST /api/launches/{id}/cancel` | R&D, process, plant admin | `{reason}` |
 
+### Product fields
+
+| Method and path | Roles | Purpose |
+|---|---|---|
+| `GET /api/categories/{id}/fields` | any | All fields (Draft, Active, Retired) with coverage of the history, weight and whether each is used for matching |
+| `POST /api/categories/{id}/fields` | category owner | Create a field as a Draft. Body: `code, name, type, kind?, unit?, choices?, absMin?, absMax?, required?, helpText?, section?, sortOrder?, aiVisible?, initialWeight?` |
+| `PATCH /api/categories/{id}/fields/{fieldId}` | category owner | `{action: update|activate|retire|reactivate, patch?, reason?}`. Retiring needs a reason |
+| `GET /api/categories/{id}/fields/backfill-template` | category owner, plant admin | CSV of every product with its current field values |
+| `POST /api/categories/{id}/fields/backfill` | category owner, plant admin | Multipart `file`, `dryRun` (default true). Checks, or with `dryRun=false` writes, values for existing products. All or nothing |
+
+See `CUSTOM_FIELDS.md`.
+
+### Process setup
+
+| Method and path | Roles | Purpose |
+|---|---|---|
+| `GET /api/categories/{id}/process` | any | Steps, parameters (with runs holding values), quality tests, lines and per-line capability |
+| `POST /api/categories/{id}/process` | category owner, plant admin | `{action: addStep \| addParameter \| updateParameter \| setParameterStatus \| setCapability \| addTest \| updateTest \| setTestStatus, …}` |
+| `GET /api/categories/{id}/fields/{fieldId}/history` | QA, category owner, plant admin | Definition history of a product field from the audit log |
+
+See `PROCESS_SETUP.md`.
+
 ### Historical import
 
 | Method and path | Roles | Purpose |

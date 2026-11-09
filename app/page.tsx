@@ -49,7 +49,7 @@ export default async function Dashboard() {
         </div>
       </div>
 
-      <div className="card" style={{ marginTop: 14 }}>
+      <div className="card navy" style={{ marginTop: 14 }}>
         <h2>With a recommendation</h2>
         {used ? (
           <div className="grid g4">

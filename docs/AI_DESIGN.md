@@ -25,6 +25,10 @@
 
 Model names default to `claude-sonnet-5-5` and `claude-haiku-5-5` and are set by environment variables.
 
+## Custom product fields
+
+Fields defined by category owners flow into the AI features as described in `CUSTOM_FIELDS.md`. The key control is the per-field **Allow Claude to see this field** switch: a field marked "never shared" is excluded from form filling, explanations, history questions and rule suggestions. It defaults to off for free text. Text values are wrapped as data in prompts and capped at 500 characters. When a report is read, Claude may also propose values for these product fields (with source quotes); approval fills only empty fields and never overwrites.
+
 ## Guardrails
 
 1. **Schema validation.** Every Claude output is parsed with zod. Invalid output is rejected, logged as invalid, and the user sees a clear message or the standard fallback.

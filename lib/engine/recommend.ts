@@ -9,26 +9,43 @@ const maxSev = (a: Severity, b: Severity): Severity => (SEV_RANK[b] > SEV_RANK[a
 
 const round = (n: number, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
 
-/** Weighted distance between the target and one historical launch (0 = identical). */
-export function distance(
+/**
+ * Weighted distance between the target and one historical launch (0 = identical).
+ * Only fields that BOTH products have a value for are compared, and the weights are rescaled over those fields.
+ * A missing value therefore never makes a launch look closer. `coverage` is the share of the total weight that could be compared.
+ */
+export function distanceWithCoverage(
   target: Attrs,
   cand: Attrs,
   attrs: RecInput["attrDefs"],
   w: Record<string, number>,
   ranges: Record<string, number>,
-): number {
+): { d: number; coverage: number } {
   let s = 0;
+  let present = 0;
+  let total = 0;
   for (const a of attrs) {
+    const wa = w[a.code] ?? 0;
+    total += wa;
     const t = target[a.code];
     const c = cand[a.code];
     if (t === undefined || c === undefined) continue;
+    present += wa;
     let d: number;
     if (a.type === "numeric") d = Math.abs(Number(t) - Number(c)) / (ranges[a.code] || 1);
     else d = t === c ? 0 : 1;
-    s += (w[a.code] ?? 0) * d * d;
+    s += wa * d * d;
   }
-  return Math.sqrt(s);
+  if (total === 0) return { d: 0, coverage: 1 };
+  if (present === 0) return { d: 1, coverage: 0 };
+  return { d: Math.sqrt(s * (total / present)), coverage: present / total };
 }
+
+export function distance(target: Attrs, cand: Attrs, attrs: RecInput["attrDefs"], w: Record<string, number>, ranges: Record<string, number>): number {
+  return distanceWithCoverage(target, cand, attrs, w, ranges).d;
+}
+
+export const MATCHABLE_TYPES = ["numeric", "choice", "boolean"];
 
 export function similarityFromDistance(d: number): number {
   return Math.exp(-3 * d);
@@ -38,6 +55,7 @@ export function evalCondition(cond: RuleCondition, target: Attrs): boolean {
   if ("all" in cond) return cond.all.every((c) => evalCondition(c, target));
   const v = target[cond.attr];
   if (v === undefined) return false;
+  if (typeof cond.value === "boolean") return cond.op === "==" && v === cond.value;
   const a = typeof cond.value === "number" ? Number(v) : String(v);
   switch (cond.op) {
     case ">": return a > cond.value;
@@ -56,13 +74,28 @@ function weightedStats(values: number[], weights: number[]) {
 }
 
 export function recommend(input: RecInput): RecResult {
-  const { attrDefs, paramDefs, target, lineId, lineCaps, history, weights, rules, topN, minMatched } = input;
-  const attrW = normalise(Object.fromEntries(attrDefs.map((a) => [a.code, weights.attributes[a.code] ?? DEFAULT_LEVEL])));
-  const paramLevels = Object.fromEntries(paramDefs.map((p) => [p.code, weights.parameters[p.code] ?? DEFAULT_LEVEL]));
-  const paramW = normalise(paramLevels);
+  const { paramDefs, target, lineId, lineCaps, history, weights, rules, topN, minMatched } = input;
+  const minFieldCoverage = input.minFieldCoverage ?? 0.3;
 
   // Candidate pool: launches that reached acceptance.
   const pool = history.filter((h) => h.acceptedParams);
+
+  // Only active matching fields of a comparable type are used, and only when enough of the history has a value for them.
+  const ignoredFields: RecResult["ignoredFields"] = [];
+  const attrDefs = input.attrDefs.filter((a) => {
+    if ((a.kind ?? "matching") !== "matching" || !MATCHABLE_TYPES.includes(a.type) || (a.status ?? "Active") !== "Active") return false;
+    if (pool.length > 0) {
+      const cov = pool.filter((h) => h.attrs[a.code] !== undefined).length / pool.length;
+      if (cov < minFieldCoverage) {
+        ignoredFields.push({ code: a.code, name: a.name, reason: `only ${Math.round(cov * 100)}% of past launches have a value (minimum ${Math.round(minFieldCoverage * 100)}%)` });
+        return false;
+      }
+    }
+    return true;
+  });
+  const attrW = normalise(Object.fromEntries(attrDefs.map((a) => [a.code, weights.attributes[a.code] ?? DEFAULT_LEVEL])));
+  const paramLevels = Object.fromEntries(paramDefs.map((p) => [p.code, weights.parameters[p.code] ?? DEFAULT_LEVEL]));
+  const paramW = normalise(paramLevels);
 
   // Range per numeric attribute, over history plus the target, used to scale differences.
   const ranges: Record<string, number> = {};
@@ -78,17 +111,20 @@ export function recommend(input: RecInput): RecResult {
   // Rank by weighted distance. A different line adds a small penalty.
   const ranked = pool
     .map((h) => {
-      const d = distance(target, h.attrs, attrDefs, attrW, ranges) + (h.lineId === lineId ? 0 : 0.1);
-      return { h, sim: similarityFromDistance(d) };
+      const { d: base, coverage } = distanceWithCoverage(target, h.attrs, attrDefs, attrW, ranges);
+      const d = base + (h.lineId === lineId ? 0 : 0.1);
+      // Low coverage means the comparison rests on fewer fields: shrink the similarity accordingly.
+      return { h, coverage, sim: similarityFromDistance(d) * (0.5 + 0.5 * coverage) };
     })
     .sort((a, b) => b.sim - a.sim)
     .slice(0, topN);
 
   const neighbours: Neighbour[] = ranked.map((r, i) => ({
-    launchId: r.h.launchId, code: r.h.code, similarity: round(r.sim, 3), rank: i + 1, wasGood: r.h.firstPass,
+    launchId: r.h.launchId, code: r.h.code, similarity: round(r.sim, 3), rank: i + 1, wasGood: r.h.firstPass, coverage: round(r.coverage, 3),
   }));
   const nMatched = ranked.length;
   const meanSimilarity = nMatched ? ranked.reduce((a, r) => a + r.sim, 0) / nMatched : 0;
+  const meanCoverage = nMatched ? ranked.reduce((a, r) => a + r.coverage, 0) / nMatched : 1;
 
   // Windows per parameter.
   const lines: RecLine[] = [];
@@ -136,6 +172,9 @@ export function recommend(input: RecInput): RecResult {
   let confidence: Confidence = "Low";
   if (nMatched >= 5 && meanSimilarity >= 0.5) confidence = "High";
   else if (nMatched >= minMatched && meanSimilarity >= 0.3) confidence = "Medium";
+  // Thin comparisons cannot be highly confident.
+  if (meanCoverage < 0.4) confidence = "Low";
+  else if (meanCoverage < 0.7 && confidence === "High") confidence = "Medium";
 
   // ---- Risk flags ----
   const flags: RiskFlag[] = [];
@@ -197,8 +236,26 @@ export function recommend(input: RecInput): RecResult {
     }
   }
 
+  // Missing data: fields left out of the comparison, fields the target lacks, and thin coverage.
+  for (const f of ignoredFields)
+    flags.push({ type: "missing_data", severity: "Low", message: `${f.name} is not used for matching yet: ${f.reason}.`, detail: { field: f.code } });
+  for (const a of attrDefs) {
+    if (target[a.code] === undefined && (attrW[a.code] ?? 0) > 0)
+      flags.push({ type: "missing_data", severity: "Medium", message: `This product has no value for ${a.name}, so it is skipped when finding similar launches.`, detail: { field: a.code } });
+  }
+  if (nMatched && meanCoverage < 0.7)
+    flags.push({ type: "missing_data", severity: "Medium", message: `The matches rest on fewer product fields than usual (average ${Math.round(meanCoverage * 100)}% of the weighted fields are known for both products).`, detail: { meanCoverage: round(meanCoverage, 3) } });
+
   for (const r of rules) {
     if (evalCondition(r.condition, target)) flags.push({ type: "sme_rule", severity: r.severity, message: r.message, smeRuleId: r.id });
+  }
+
+  // A parameter added after the history was recorded has no past values: its window is only the middle of the line capability.
+  for (const l of lines) {
+    if (l.basedOn === 0 && nMatched > 0) {
+      const p = paramDefs.find((x) => x.code === l.code)!;
+      flags.push({ type: "missing_data", severity: "Medium", message: `No similar launch recorded ${p.name}, so its window is only the middle of the line capability. Treat it as a starting guess.`, detail: { parameter: l.code } });
+    }
   }
 
   const clippedLines = lines.filter((l) => l.clipped);
@@ -218,7 +275,7 @@ export function recommend(input: RecInput): RecResult {
 
   return {
     engineVersion: ENGINE_VERSION, neighbours, lines, confidence, flags, overallRisk, nMatched,
-    meanSimilarity: round(meanSimilarity, 3),
+    meanSimilarity: round(meanSimilarity, 3), meanCoverage: round(meanCoverage, 3), ignoredFields,
     normalisedWeights: { attributes: attrW, parameters: paramW },
   };
 }

@@ -20,6 +20,7 @@ The Cloudflare tunnel should forward to `http://localhost:9361`.
 | `CLAUDE_MODEL_MAIN`, `CLAUDE_MODEL_FAST` | Models for explanation, reading, questions (main) and form parsing (fast) |
 | `MIN_MATCHED_LAUNCHES` | Below this many similar launches, confidence is Low (default 3) |
 | `TOP_N_NEIGHBOURS` | Similar launches used per recommendation (default 7) |
+| `MIN_FIELD_COVERAGE` | A matching product field is used only when at least this share of past launches has a value (default 0.3) |
 | `SEED_MODE` | On first start with an empty database: `demo` loads synthetic history and a demo launch, `config` loads users, lines, parameters and rules only (then use **Import history**), `none` does nothing |
 | `DEMO_USER_SWITCHER` | `false` removes the role switcher. Set it when real sign-on is in front of the app. |
 

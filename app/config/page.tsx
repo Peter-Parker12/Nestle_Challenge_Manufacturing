@@ -70,9 +70,9 @@ export default function Config() {
         <>
           <div className="grid g2">
             <div className="card">
-              <h2>Product attributes</h2>
+              <div className="row" style={{ justifyContent: "space-between" }}><h2 style={{ margin: 0 }}>Product fields used for matching</h2><a className="small" href="/config/fields">Manage fields →</a></div>
               <div className="tw"><table><thead><tr><th>Attribute</th><th>Type</th><th>Allowed</th><th>Default weight</th></tr></thead><tbody>
-                {cfg.attrDefs.map((a: any) => (
+                {cfg.attrDefs.filter((a: any) => (a.kind ?? "matching") === "matching" && ["numeric", "choice", "boolean"].includes(a.type)).map((a: any) => (
                   <tr key={a.code}><td>{a.name}{a.required ? " *" : ""}</td><td>{a.type}</td><td className="muted">{a.type === "numeric" ? `${a.absMin} to ${a.absMax} ${a.unit ?? ""}` : a.choices?.join(", ")}</td>
                     <td><select aria-label={`${a.name} default weight`} disabled={!owner} value={lvl("attributes", a.code)} onChange={(e) => setDraft({ ...draft, attributes: { ...draft.attributes, [a.code]: Number(e.target.value) } })}>
                       {LEVEL_LABELS.map((l, i) => <option key={l} value={i}>{i} · {l}</option>)}</select></td></tr>

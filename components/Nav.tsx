@@ -12,7 +12,9 @@ const links = [
   { href: "/launches/new", label: "New launch", sub: "Start a trial plan" },
   { href: "/import", label: "Import history", sub: "Upload previous runs" },
   { href: "/ask", label: "Ask the history", sub: "Questions with citations" },
-  { href: "/config", label: "Configuration", sub: "Parameters, weights, rules" },
+  { href: "/config", label: "Configuration", sub: "Weights and expert rules" },
+  { href: "/config/fields", label: "Product fields", sub: "Custom fields per category" },
+  { href: "/config/process", label: "Process setup", sub: "Parameters, tests, line limits" },
   { href: "/audit", label: "Audit log", sub: "Every change, who and why" },
 ];
 
@@ -20,7 +22,7 @@ export default function Nav({ user, users, switcher }: { user: U; users: U[]; sw
   const path = usePathname();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const active = (href: string) => (href === "/" ? path === "/" : path === href || (path.startsWith(href + "/") && !links.some((l) => l.href !== href && l.href.startsWith(href) && path.startsWith(l.href))));
+  const active = (href: string) => (href === "/" ? path === "/" : path === href || (path.startsWith(href + "/") && !links.some((l) => l.href !== href && l.href.startsWith(href + "/") && path.startsWith(l.href))));
 
   async function switchTo(id: string) {
     setBusy(true);
@@ -30,8 +32,10 @@ export default function Nav({ user, users, switcher }: { user: U; users: U[]; sw
   }
   return (
     <aside className="side">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img className="logo" src="/brand/logo-white.png" alt="Workforce Solution" width={148} height={62} />
       <div className="brand">Launch Accelerator</div>
-      <div className="brand-sub">BAF-1 · Nestlé Vietnam AI Reinvention</div>
+      <div className="brand-sub">BAF-1 · prepared for the Nestlé Vietnam AI Reinvention programme</div>
       <nav className="nav" aria-label="Main">
         {links.map((l) => (
           <Link key={l.href} href={l.href} className={active(l.href) ? "on" : ""}>

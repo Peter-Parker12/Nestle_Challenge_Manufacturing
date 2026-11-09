@@ -45,6 +45,8 @@ Open **Audit log**: every step with who and why. Mention that the log, decisions
 - **Configuration**: show the second category (Sauces) set up with different parameters and no history. Explain that adding a category needs no code change. As the category owner, change a default weight (reason required) and, with a key, **Look for patterns** to get suggested expert rules.
 - **Import a trial report** (needs a key): upload a short text or PDF report and approve the extracted run.
 
+- **Product fields** (as the category owner): add a field such as *Pack type* (choice), back-fill values for the existing launches, activate it and set its weight on Configuration. It then appears on the New launch form and in the next recommendation's weights.
+
 ## Honest framing to say out loud
 
 - The data is synthetic. The numbers show the method working, not its accuracy.
