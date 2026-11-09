@@ -116,7 +116,7 @@ export default function ProductFields() {
         <h2>Fields in this category</h2>
         <div className="tw">
           <table>
-            <thead><tr><th>Field</th><th>Type</th><th>Status</th><th>Values in history</th><th>Weight</th><th>Claude</th>{owner && <th />}</tr></thead>
+            <thead><tr><th>Field</th><th>Type</th><th>Status</th><th>Values in history</th><th>Weight</th><th>AI assistants</th>{owner && <th />}</tr></thead>
             <tbody>
               {!data && <tr><td colSpan={7} className="muted">Loading…</td></tr>}
               {data?.fields.map((f: any) => {
@@ -208,9 +208,9 @@ export default function ProductFields() {
               )}
               <div className="row" style={{ marginTop: 12, gap: 18 }}>
                 <label style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--ink)", fontSize: 13.5 }}><input type="checkbox" checked={form.required} onChange={(e) => set({ required: e.target.checked })} />Required on new launches</label>
-                <label style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--ink)", fontSize: 13.5 }}><input type="checkbox" checked={form.aiVisible} onChange={(e) => setForm({ ...form, aiVisible: e.target.checked, aiTouched: true })} />Allow Claude to see this field</label>
+                <label style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--ink)", fontSize: 13.5 }}><input type="checkbox" checked={form.aiVisible} onChange={(e) => setForm({ ...form, aiVisible: e.target.checked, aiTouched: true })} />Allow AI assistants (Claude, Copilot) to see this field</label>
               </div>
-              {form.type === "text" && form.aiVisible && <div className="msg warn">Free text can contain confidential or personal details. It is off by default. Only allow Claude to see it if the text is safe to send.</div>}
+              {form.type === "text" && form.aiVisible && <div className="msg warn">Free text can contain confidential or personal details. It is off by default. Only allow AI assistants to see it if the text is safe to send.</div>}
               {form.required && <div className="msg warn">A required field blocks new launches and imports that leave it empty. Older launches without a value stay as they are.</div>}
               <div style={{ marginTop: 14 }}><button disabled={busy || !form.name.trim() || !form.code.trim()} onClick={create}>{busy ? "Saving…" : "Save as draft"}</button></div>
             </div>
@@ -320,7 +320,7 @@ function EditPanel({ f, busy, onSave, onCancel }: any) {
           <label style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--ink)", fontSize: 13.5 }}><input type="checkbox" checked={v.kind === "matching"} onChange={(e) => setV({ ...v, kind: e.target.checked ? "matching" : "info" })} />Affects matching</label>
         )}
         <label style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--ink)", fontSize: 13.5 }}><input type="checkbox" checked={v.required} onChange={(e) => setV({ ...v, required: e.target.checked })} />Required</label>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--ink)", fontSize: 13.5 }}><input type="checkbox" checked={v.aiVisible} onChange={(e) => setV({ ...v, aiVisible: e.target.checked })} />Allow Claude to see this field</label>
+        <label style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--ink)", fontSize: 13.5 }}><input type="checkbox" checked={v.aiVisible} onChange={(e) => setV({ ...v, aiVisible: e.target.checked })} />Allow AI assistants (Claude, Copilot) to see this field</label>
       </div>
       <div className="row" style={{ marginTop: 10 }}><button disabled={busy} onClick={save}>Save changes</button><button className="ghost" onClick={onCancel}>Cancel</button></div>
     </div>

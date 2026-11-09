@@ -27,7 +27,11 @@ Model names default to `claude-sonnet-5-5` and `claude-haiku-5-5` and are set by
 
 ## Custom product fields
 
-Fields defined by category owners flow into the AI features as described in `CUSTOM_FIELDS.md`. The key control is the per-field **Allow Claude to see this field** switch: a field marked "never shared" is excluded from form filling, explanations, history questions and rule suggestions. It defaults to off for free text. Text values are wrapped as data in prompts and capped at 500 characters. When a report is read, Claude may also propose values for these product fields (with source quotes); approval fills only empty fields and never overwrites.
+Fields defined by category owners flow into the AI features as described in `CUSTOM_FIELDS.md`. The key control is the per-field **Allow AI assistants to see this field** switch: a field marked "never shared" is excluded from form filling, explanations, history questions and rule suggestions. It defaults to off for free text. Text values are wrapped as data in prompts and capped at 500 characters. When a report is read, Claude may also propose values for these product fields (with source quotes); approval fills only empty fields and never overwrites.
+
+## Microsoft Copilot (MCP)
+
+Copilot is a second AI that can read this tool's data through the MCP endpoint (`COPILOT_MCP.md`). The same controls apply: fields marked "never shared" are excluded, nothing can be approved or decided through it, and every call is audited. Unlike the Claude features, whatever a tool returns is sent to Microsoft, so Nestlé's data approval must cover Copilot as well.
 
 ## Guardrails
 

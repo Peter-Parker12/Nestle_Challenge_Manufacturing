@@ -11,6 +11,7 @@ The demo is built with production-style practices, but it is a demo. This list i
 | **Real data import** | CSV upload with validation, staging and export (see `IMPORT_FORMAT.md`) | A mapping from Nestlé's real source (trial report files, SharePoint, an MES or LIMS extract) into the CSV format. Reading old PDF or Word reports in bulk with Claude is not built; it works one run at a time. |
 | **Recommendation validation** | Only tested on synthetic data generated from a similar model | Evaluate on held-out real launches. Agree the success threshold with Nestlé before claiming any benefit. |
 | **Secrets and transport** | `.env` file on the server; TLS ends at Cloudflare | Secrets manager or at least restricted file permissions; confirm tunnel configuration |
+| **Copilot identity and approval** | One shared service account behind an API key. The audit log shows "Copilot (MCP)", not the person | OAuth with Microsoft Entra ID so each Copilot user acts as themselves with their own role. Nestlé approval for sending launch data to Microsoft Copilot. Test with a real Copilot Studio agent |
 | **Backups** | Manual `pg_dump` in the runbook | Scheduled, tested restores, retention policy |
 
 ## Should fix

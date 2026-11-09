@@ -21,7 +21,7 @@ Fields belong to a **category**, not to a single product, so every product in th
 | Text | Text area | Up to 500 characters |
 | Date | Date picker | `YYYY-MM-DD` |
 
-Every field also has: a name, a code (lowercase letters, digits and underscores, used in files), optional help text, an optional section heading on the form, an order, whether it is required, and whether Claude may see it.
+Every field also has: a name, a code (lowercase letters, digits and underscores, used in files), optional help text, an optional section heading on the form, an order, whether it is required, and whether AI assistants may see it.
 
 ## Lifecycle
 
@@ -86,7 +86,7 @@ Only filled cells are written. Empty cells never clear a value. Run data is not 
 | Suggest expert rules | Considers numeric matching fields only |
 | Read a trial report | Claude may also propose product field values it finds in the report, each with a source quote. A person approves them. Approval fills **only fields that are still empty** and only values that pass the field's own rules. A different value in the report is shown as a problem and never overwrites what is stored. Private fields are not offered |
 
-**Allow Claude to see this field.** Each field has this switch. A field marked "never shared" is left out of every prompt: its name and values are not sent in form filling, explanations, history questions or rule suggestions. It defaults to **off for text fields** (free text can hold confidential or personal details) and on for the other types. The call log records which rows each call was given.
+**Allow AI assistants to see this field.** Each field has this switch. A field marked "never shared" is left out of every prompt sent to Claude, and out of everything returned to Microsoft Copilot through the MCP endpoint (`COPILOT_MCP.md`): its name and values are not sent in form filling, explanations, history questions, rule suggestions or Copilot answers, and Copilot cannot write it. It defaults to **off for text fields** (free text can hold confidential or personal details) and on for the other types. The call log records which rows each call was given.
 
 ## History and reproducibility
 

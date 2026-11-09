@@ -20,6 +20,10 @@ The Cloudflare tunnel should forward to `http://localhost:9361`.
 | `CLAUDE_MODEL_MAIN`, `CLAUDE_MODEL_FAST` | Models for explanation, reading, questions (main) and form parsing (fast) |
 | `MIN_MATCHED_LAUNCHES` | Below this many similar launches, confidence is Low (default 3) |
 | `TOP_N_NEIGHBOURS` | Similar launches used per recommendation (default 7) |
+| `MCP_API_KEY` | Switches the Copilot MCP endpoint on (at least 16 characters, for example `openssl rand -hex 32`). Empty means off |
+| `MCP_SERVICE_ROLE` | Role of the Copilot service account: `viewer` (read only), `rd_engineer` (default), `process_engineer` |
+| `PUBLIC_BASE_URL` | Public address, used for the review links Copilot gives to people |
+| `MCP_RATE_LIMIT_PER_MIN` | Calls per minute per key (default 60) |
 | `MIN_FIELD_COVERAGE` | A matching product field is used only when at least this share of past launches has a value (default 0.3) |
 | `SEED_MODE` | On first start with an empty database: `demo` loads synthetic history and a demo launch, `config` loads users, lines, parameters and rules only (then use **Import history**), `none` does nothing |
 | `DEMO_USER_SWITCHER` | `false` removes the role switcher. Set it when real sign-on is in front of the app. |
@@ -68,6 +72,10 @@ The audit log is part of the database and is included.
 ## Rotate the Claude key
 
 Edit `ANTHROPIC_API_KEY` in `.env`, then `docker compose up -d app`. No rebuild needed.
+
+## Rotating the MCP key
+
+Change `MCP_API_KEY` in `.env`, run `docker compose up -d app`, then update the connection in Copilot Studio. To see what Copilot did: `select at, entity_id as tool, after from audit.event where action='MCP_TOOL' order by id desc limit 20;`
 
 ## Troubleshooting
 

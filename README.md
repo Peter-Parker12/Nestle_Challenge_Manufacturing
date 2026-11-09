@@ -15,6 +15,7 @@ All data in this repository is **synthetic**. Nothing here is Nestlé data.
 | Weights | Engineers set 0 to 5 importance per attribute and parameter, at platform, category and recipe level, with a reason and an audit trail. Effect can be previewed before saving. |
 | Launch, run, outcome | A product launch holds many trial runs. Run result (Pass, Marginal, Fail) is calculated from quality results, not typed. Reason codes, next step, technical acceptance by QA. |
 | Claude features | Describe a product in words to fill the form; plain-language explanation of a recommendation; ask questions about the history with checked citations; import a trial report (PDF or text); suggested expert rules from failure patterns. |
+| Microsoft Copilot (MCP) | An MCP server at `/mcp` lets Copilot Studio look up launches, draft a launch, ask for a recommendation and ask why. It can never approve or decide: those tools do not exist. API-key sign-in, a fixed service role, rate limit, audit. See [docs/COPILOT_MCP.md](docs/COPILOT_MCP.md). |
 | Process setup | Category owners and plant admins manage process steps, parameters, quality tests and per-line capability, with the same retire-never-delete rules. See [docs/PROCESS_SETUP.md](docs/PROCESS_SETUP.md). |
 | Custom product fields | Category owners add fields per category (number, choice, yes/no, text, date), choose whether each affects matching, back-fill values for existing launches, and decide whether Claude may see them. See [docs/CUSTOM_FIELDS.md](docs/CUSTOM_FIELDS.md). |
 | Starting database | **Import history** page: upload previous launches and runs as CSV, with a per-category template, a row-by-row check before anything is saved, and an export in the same format. See [docs/IMPORT_FORMAT.md](docs/IMPORT_FORMAT.md). |
@@ -72,6 +73,7 @@ npm run typecheck
 API_BASE=http://localhost:9361 npm run test:int       # 20 end-to-end checks (writes to the DB; reseed after)
 API_BASE=http://localhost:9361 npx vitest run tests/fields.int.test.ts   # 10 custom-field checks (needs a freshly seeded DB)
 API_BASE=http://localhost:9361 npx vitest run tests/process.int.test.ts  # 9 process-setup checks (needs a freshly seeded DB)
+API_BASE=http://localhost:9361 MCP_API_KEY=<key> npm run test:mcp          # 15 MCP checks (server started with the same key; fresh DB)
 ```
 
 To exercise the Claude code paths without a key, run `node tests/mock-claude.mjs` and start the app with
@@ -82,6 +84,7 @@ To exercise the Claude code paths without a key, run `node tests/mock-claude.mjs
 | Document | Contents |
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, design decisions |
+| [docs/COPILOT_MCP.md](docs/COPILOT_MCP.md) | Connecting Microsoft Copilot: tools, safeguards, setup, limits |
 | [docs/PROCESS_SETUP.md](docs/PROCESS_SETUP.md) | Parameters, quality tests and line capability: rules and what a new one means for recommendations |
 | [docs/CUSTOM_FIELDS.md](docs/CUSTOM_FIELDS.md) | Product fields: kinds, lifecycle, rules, missing values, back-fill, AI handling |
 | [docs/IMPORT_FORMAT.md](docs/IMPORT_FORMAT.md) | Loading historical data: file format, rules, export |

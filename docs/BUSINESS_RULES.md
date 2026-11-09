@@ -34,6 +34,17 @@ Rule numbers follow the BA specification. Status: **Done**, **Partial**, or **No
 | Importing a report never writes data until a person approves, and then goes through the normal results path so all rules apply | App `approveExtraction` |
 | AI output must pass schema validation; cited launch codes must exist in what the model was given; numbers not in the data are flagged | App `lib/ai` |
 
+## Copilot (MCP) rules
+
+| Rule | Enforced in | Tested by |
+|---|---|---|
+| Copilot can draft launches and request recommendations but never approve, decide, enter results, record acceptance or change setup: those tools do not exist | Tool list in `lib/mcp/server.ts` | mcp test "cannot approve, reject, record results…" |
+| A recommendation requested through MCP is a proposal: no decision, no run, status stays Recommended | App | mcp test "recommends as a proposal only" |
+| The service account's role is checked on every tool; a viewer cannot draft or recommend | App `can()` | manual check with `MCP_SERVICE_ROLE=viewer` |
+| A valid API key is required; the endpoint is off without one; calls are rate limited | App `lib/mcp/auth.ts` | mcp tests; manual checks (503, 429) |
+| Fields marked never shared are absent from tool output and cannot be written | App | mcp test "keeps fields marked never shared… out" |
+| Every tool call and every change it makes is audited under "Copilot (MCP)" | App, DB triggers | mcp test "acts as a service account… audited" |
+
 ## Product field rules
 
 | Rule | Enforced in | Tested by |

@@ -48,6 +48,15 @@ All errors return `{ "error": "<code>", "message": "<text>" }`.
 | `POST /api/launches/{id}/ta` | QA | `{decision: Accepted|Accepted with conditions|Rejected}` |
 | `POST /api/launches/{id}/cancel` | R&D, process, plant admin | `{reason}` |
 
+### MCP endpoint (Microsoft Copilot)
+
+| Method and path | Auth | Purpose |
+|---|---|---|
+| `POST /mcp` (also `/api/mcp`) | `Authorization: Bearer <MCP_API_KEY>` or `x-api-key` | MCP over Streamable HTTP (stateless, JSON). Nine tools; none can approve, decide, enter results or change setup. 503 if `MCP_API_KEY` is not set, 401 for a wrong key, 429 over the rate limit |
+| `GET /mcp`, `DELETE /mcp` | same | 405. The server does not stream or keep sessions |
+
+See `COPILOT_MCP.md`.
+
 ### Product fields
 
 | Method and path | Roles | Purpose |

@@ -8,6 +8,7 @@
 | Type check | `npm run typecheck` | – | Whole project, strict mode |
 | End to end | `API_BASE=http://localhost:9361 npm run test:int` | 20 | Full launch lifecycle through the HTTP API against a real PostgreSQL: roles, validation, recommendation, weights, decisions, runs, rules BR-02 to BR-15, audit, KPIs, fallback without a key |
 | Process setup end to end | `API_BASE=… npx vitest run tests/process.int.test.ts` | 9 | Permissions, validation, capability limits, the no-history flag, edit restrictions, critical test fails a run, retirement, field history, audit (needs a freshly seeded database) |
+| MCP endpoint | `API_BASE=… MCP_API_KEY=… npm run test:mcp` | 15 | Sign-in, tool list and annotations, no approve or decide tools, category setup, error messages, draft stays Draft, recommendation is a proposal, what-if saves nothing, explanations, private fields excluded and unwritable, audit under the service account (needs a server started with the same key and a fresh database) |
 | Custom fields end to end | `API_BASE=… npx vitest run tests/fields.int.test.ts` | 10 | Field lifecycle, permissions, back-fill, activation, weights, sparse-field handling, edit restrictions, retirement, audit (needs a freshly seeded database) |
 | Database rules | manual SQL (below) | 11 + 5 | Rules hold when the application is bypassed |
 | Claude code paths | mock API (below) | 5 features | Validation, citations, number checks, tool loop, extraction approval |
@@ -23,6 +24,12 @@ The end-to-end suite writes to the database. Reseed afterwards: `npx tsx scripts
 Export the 60 seeded launches, wipe the database to the reference setup, import the file, export again: the two files are **byte-identical** (17,430 bytes), and the recommendation for the same new product is identical (same windows, start values, similarity scores). A deliberately broken file (unknown line, setting out of range) was refused with the exact rows reported, commit without skipping returned 409, commit with skipping imported 58 and skipped 2, and an R&D user was refused.
 
 This test found and fixed a real bug: `date` columns were converted through the server time zone, shifting acceptance dates by one day on export.
+
+## MCP checks done by hand
+
+Raw JSON-RPC against the running server: `initialize` and `tools/list` return plain JSON with the nine tools; a bad launch code is a readable tool error; an unknown tool and out-of-range input are rejected; with `MCP_SERVICE_ROLE=viewer` the service account reads but is refused `create_launch` and `recommend` (and the database row shows role viewer, inactive); with `MCP_RATE_LIMIT_PER_MIN=5` the sixth call in a minute gets 429; with no `MCP_API_KEY` the endpoint answers 503 and `/api/health` shows `mcp: false`.
+
+Not tested: a real Copilot Studio agent.
 
 ## Private fields never reach Claude
 

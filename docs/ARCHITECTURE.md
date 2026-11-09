@@ -17,6 +17,10 @@ Browser ── Cloudflare tunnel ── :9361 ── Next.js app (UI + API route
 
 One Next.js application serves the UI and the JSON API. PostgreSQL holds all state. The Claude API is called only from server code.
 
+## Copilot (MCP)
+
+A second front door to the same repository and engine: `/mcp` serves nine MCP tools to Microsoft Copilot over Streamable HTTP. It runs as a fixed service account, checks that account's role on every tool, and exposes no tool that approves, decides or changes setup. See `COPILOT_MCP.md`.
+
 ## Principles
 
 1. **The numbers come from code.** Similarity, windows, clipping and risk flags are computed by the engine in `lib/engine`. Claude explains and reads; it never produces a recommended value. This keeps every recommendation reproducible and testable.
