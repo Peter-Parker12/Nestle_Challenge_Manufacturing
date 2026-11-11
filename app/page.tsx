@@ -3,6 +3,7 @@ import { badge } from "@/components/api";
 import { PosLink } from "@/components/assetUi";
 import { plantOverview } from "@/lib/assets";
 import { riskBoard } from "@/lib/risk";
+import { fillerHealth, listFillers } from "@/lib/linehealth";
 import { dashboardKpis, listLaunches } from "@/lib/repo";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,8 @@ export default async function Dashboard() {
   const plant = await plantOverview();
   const pk = plant.kpis;
   const risk = await riskBoard();
+  const fillers = await listFillers();
+  const fh = fillers[0] ? await fillerHealth(fillers[0].id) : null;
   const watch = risk.ranked.filter((r) => r.result.level !== "Low").slice(0, 8);
   const launches = (await listLaunches()) as any[];
   const open = launches.filter((l) => !["Closed", "Cancelled"].includes(l.status));
@@ -47,10 +50,11 @@ export default async function Dashboard() {
           <div className="small muted">Every seal with its history, an explained risk score, alerts and the stop to change it in.</div>
           <p style={{ margin: "10px 0 0" }}><strong>{pk.positions}</strong> positions · <strong>{risk.counts.High}</strong> High risk · <Link href="/risk">Risk</Link> · <Link href="/assets">Plant map</Link></p>
         </div>
-        <div className="mod next">
+        <div className="mod">
           <div className="tag">DNF-2 · LINE HEALTH</div>
           <h3>&quot;Hey, Filler&quot; maintenance assistant</h3>
-          <div className="small muted">Prioritised filler health with evidence and step-by-step troubleshooting, linked to seal condition. Phase 3.</div>
+          <div className="small muted">Prioritised filler health with evidence, stoppage trend and step-by-step troubleshooting, linked to seal condition.</div>
+          <p style={{ margin: "10px 0 0" }}>{fh ? <>Needs attention first: <strong>{fh.stations[0].name}</strong> ({fh.stations[0].level}) · </> : null}<Link href="/line-health">Filler health</Link></p>
         </div>
       </div>
 

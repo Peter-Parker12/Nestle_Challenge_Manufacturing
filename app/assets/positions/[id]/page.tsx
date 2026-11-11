@@ -6,6 +6,7 @@ import { getPosition } from "@/lib/assets";
 import RiskPanel from "@/components/RiskPanel";
 import { getUser } from "@/lib/auth";
 import { positionRisk } from "@/lib/risk";
+import { alarmsForPosition } from "@/lib/linehealth";
 import { q1 } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,7 @@ export default async function PositionPage({ params }: { params: Promise<{ id: s
   try { d = await getPosition(id); } catch { notFound(); }
   const user = await getUser();
   const risk = await positionRisk(id);
+  const stationAlarms = await alarmsForPosition(id);
   const { position: p, history, incidents, partTypes } = d;
   const seq = (await q1<{ n: number }>("select coalesce(max(substring(code from '[0-9]{1,9}$')::int),0)+1 as n from ast.part where code ~ '[0-9]+$'"))!.n;
   const closed = history.filter((h: any) => h.removed_on);
@@ -33,6 +35,11 @@ export default async function PositionPage({ params }: { params: Promise<{ id: s
         <div className="card kpi"><div className="l">Seals used here</div><div className="v">{history.length}</div><div className="d">{avgLife ? `average ${avgLife} days in service` : "no completed history"}</div></div>
       </div>
 
+      {stationAlarms.map((a: any) => (
+        <div key={a.station_id} className={`msg ${a.faults14 > 0 ? "warn" : "info"}`}>
+          Filler alarms at {a.station}, last 14 days: <strong>{a.n14}</strong>{a.faults14 > 0 ? ` (${a.faults14} faults)` : ""}{a.top_code ? `, mostly ${a.top_code}` : ""}. <Link href={`/line-health/stations/${a.station_id}`}>Open the station</Link>
+        </div>
+      ))}
       <RiskPanel risk={risk} />
 
       {p.position_status === "Active" && <PositionActions role={user.role} positionId={id} hasSeal={!!p.part_id} partTypes={partTypes} defaultTypeId={p.part_type_id ?? undefined} nextCode={`S-${p.part_type_code ?? "NEW"}-${seq}`} />}

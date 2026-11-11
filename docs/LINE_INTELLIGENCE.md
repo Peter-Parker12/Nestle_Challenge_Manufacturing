@@ -6,7 +6,7 @@ One app, one link (port 9361). Three use cases share one asset model, one calend
 |---|---|---|
 | BAF-1 Launch | What do we start a new product with? | Built |
 | BAF-2 Seals and gaskets | Which seals need attention, and when? | Phases 1 and 2 built (record, history, calendar, exposure ledger, explained risk score, alerts, photo inspection) |
-| DNF-2 Line health | What is wrong with the filler, what do I do? | Phase 3 |
+| DNF-2 Line health | What is wrong with the filler, what do I do? | Phase 3 built (filler health, stoppage trend, guides, Hey Filler chat) |
 | Combined | Line-health banner in launches, "Ask the plant", MCP tools | Phase 4 |
 
 ## Phase 1: what exists
@@ -46,3 +46,24 @@ Tests: `tests/assets.int.test.ts` (9, needs a running server, `DATABASE_URL`, fr
 
 Tests: `tests/seal-engine.test.ts`, `tests/risk.int.test.ts` (needs the mock Claude; see header).
 Not yet: photo assessment untested against real Claude (mock only); alerts do not notify anyone (no email or Teams); weights are global, not per equipment.
+
+## Phase 3: line health, "Hey, Filler" (built)
+
+**Data** (migration `006_line_health.sql`, schema `ops`): stations of a filler (each tied to a seal assembly), alarm events, daily KPIs (eUPS, speed, unplanned downtime, defects, material loss), breakdowns, defects, maintenance records (CIL, centerlining, PM03, repair), settings with approved windows (centerline), corrections, troubleshooting guides.
+
+**Health score** (`lib/engine/health.ts`, pure, 7 unit tests): per station 0 to 100 from six factors: alarm rate against usual, alarm trend, unplanned downtime, defects, overdue maintenance, and the BAF-2 risk of the seals in the same assembly. High ≥ 60, Medium ≥ 35. Every factor is shown with its evidence. A station with no tracked seal leaves that factor out.
+
+**Stoppage prediction**: a trend, not a trained model. The warning level is the median number of faults at a station in the 7 days before earlier breakdowns at that filler (needs at least two). If the last 7 days are at or above it, a stop is likely within a week or two; if rising, the weeks until it is reached; otherwise it says so.
+
+**Next actions** per station, by rule: replace a High-risk seal at the next window; plan a check when the fault level is at or above the earlier warning level; do the overdue task; follow the guide for the repeating alarm; return a drifted or out-of-range setting to its target.
+
+**"Auto-correct" is deliberately not automatic.** The system suggests returning a drifted setting to its target. A person changes it on the machine and then records the change; the database refuses a value outside the approved range or a stale starting value (BR-H1). The system never writes to a controller.
+
+**Hey, Filler** (`lib/ai/hey.ts`): chat in English or Vietnamese over read-only tools (health, station detail, guide search). Troubleshooting steps come only from the guides. Answers cite [A:alarm], [G:guide], [P:part]; each citation is checked against what the tools returned and unverifiable ones are flagged on screen. Without `ANTHROPIC_API_KEY` the ranking and actions still work.
+
+**Links between modules**: the filler alarm points at the seal that BAF-2 rates High; the seal page shows the filler alarms for its assembly; replacing the seal lowers the station's score (tested).
+
+**Demo story**: L1 filling valve 3 has six weeks of rising fill-weight and valve alarms, underfill defects, an overdue lubrication task, drifted settings, a worn plug seal rated High, and a breakdown 9 days ago. L2 is calm. L1 valve 6 has a pressure setting outside the approved range.
+
+Tests: `tests/health-engine.test.ts`, `tests/health.int.test.ts` (needs the mock Claude).
+Not yet: no import for alarm or PLC data (the demo data is seeded); no real PLC or historian connection (read-only integration is a phase for Nestlé IT/OT); voice input not built; the Vietnamese answers are untested with real Claude; one filler per page, no multi-filler comparison; guides are written by hand, not extracted from manuals.

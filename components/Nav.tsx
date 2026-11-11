@@ -17,7 +17,7 @@ const groups: { title: string; tag?: string; items: Item[]; soon?: { label: stri
     title: "Seals & gaskets", tag: "BAF-2",
     items: [{ href: "/risk", label: "Risk and alerts" }, { href: "/assets", label: "Plant map" }, { href: "/assets/parts", label: "Seal register" }, { href: "/assets/stops", label: "Planned stops" }],
   },
-  { title: "Line health", tag: "DNF-2", items: [], soon: [{ label: "Filler health", phase: "phase 3" }, { label: "Hey, Filler", phase: "phase 3" }] },
+  { title: "Line health", tag: "DNF-2", items: [{ href: "/line-health", label: "Filler health" }, { href: "/line-health/guides", label: "Troubleshooting guides" }] },
   {
     title: "Setup",
     items: [
