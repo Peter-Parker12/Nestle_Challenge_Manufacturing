@@ -42,7 +42,10 @@ http.createServer((req, res) => {
         : { usable: true, rating: 4, findings: "Chipped edge on the sealing lip, a fragment could come off.", confidence: "medium" } }], "tool_use");
     } else if (tool === "propose_rules")
       out = reply([{ type: "tool_use", id: "t1", name: tool, input: { rules: [{ attr: "fat_pct", op: ">", value: 2.8, severity: "Medium", message: "Fat above 2.8%: more rework seen.", rationale: "Rework rate rises in the top band.", evidence_codes: ["L-1001", "L-1002"] }] } }], "tool_use");
-    else if (!tool && body.tools?.some((t) => t.name === "get_health")) {
+    else if (!tool && body.tools?.some((t) => t.name === "get_plant_status")) {
+      if (!all.includes("tool_result")) out = reply([{ type: "tool_use", id: "t4", name: "get_plant_status", input: {} }], "tool_use");
+      else out = reply([{ type: "text", text: "L1 needs attention first: see the plug seal [P:S-NOPE-1] and launch [L:L-9998]. Seal risk is a trend, not a certainty." }]);
+    } else if (!tool && body.tools?.some((t) => t.name === "get_health")) {
       if (!all.includes("tool_result")) out = reply([{ type: "tool_use", id: "t3", name: "get_health", input: {} }], "tool_use");
       else out = reply([{ type: "text", text: "Filling valve 3 needs attention first: fill-weight alarms are repeating [A:A-FW-03] and the plug seal is rated High [P:S-NOPE-0]. Follow [G:G-FILLWT]. Also see [G:G-FAKE-99]." }]);
     } else if (!tool && body.tools?.length) {

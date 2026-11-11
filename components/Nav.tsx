@@ -8,7 +8,7 @@ type U = { id: string; name: string; role: string };
 
 type Item = { href: string; label: string };
 const groups: { title: string; tag?: string; items: Item[]; soon?: { label: string; phase: string }[] }[] = [
-  { title: "Plant", items: [{ href: "/", label: "Overview" }] },
+  { title: "Plant", items: [{ href: "/", label: "Overview" }, { href: "/plant", label: "Ask the plant" }] },
   {
     title: "Launch", tag: "BAF-1",
     items: [{ href: "/launches", label: "Launches" }, { href: "/launches/new", label: "New launch" }, { href: "/ask", label: "Ask the history" }],

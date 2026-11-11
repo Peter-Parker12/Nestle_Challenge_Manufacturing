@@ -57,7 +57,7 @@ run("MCP endpoint for Copilot", () => {
   it("lists the tools and gives them descriptions Copilot can use", async () => {
     const { tools } = await c.listTools();
     const names = tools.map((t) => t.name).sort();
-    expect(names).toEqual(["ask_history", "create_launch", "explain_recommendation", "get_category_setup", "get_dashboard", "get_launch", "list_launches", "preview_weights", "recommend"]);
+    expect(names).toEqual(["ask_history", "create_launch", "explain_recommendation", "get_category_setup", "get_dashboard", "get_filler_health", "get_launch", "get_launch_line_context", "get_plant_status", "get_seal_risk", "list_launches", "preview_weights", "recommend"]);
     for (const t of tools) { expect(t.description!.length).toBeGreaterThan(40); expect(t.inputSchema.type).toBe("object"); }
     const by = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(by.get_launch.annotations?.readOnlyHint).toBe(true);
@@ -69,8 +69,8 @@ run("MCP endpoint for Copilot", () => {
   it("cannot approve, reject, record results or acceptance, or change setup: no such tools exist", async () => {
     const names = (await c.listTools()).tools.map((t) => t.name).join(" ");
     for (const w of ["approve", "decide", "decision", "reject", "result", "review", "accept", "ta", "weights_set", "field", "parameter", "cancel", "import"]) {
-      // preview_weights is read-only and the only name containing "weights"
-      const hit = names.split(" ").filter((n) => n.includes(w) && !["preview_weights"].includes(n));
+      // preview_weights is read-only and the only name containing "weights"; get_plant_status only contains "ta" inside "status"
+      const hit = names.split(" ").filter((n) => n.includes(w) && !["preview_weights", "get_plant_status"].includes(n));
       expect(hit, `unexpected tool matching "${w}"`).toEqual([]);
     }
   });
@@ -197,6 +197,23 @@ run("MCP endpoint for Copilot", () => {
     expect(calls.length).toBeGreaterThan(5);
     expect(calls.every((e: any) => e.user_name === "Copilot (MCP)")).toBe(true);
     expect(audit.some((e: any) => e.entity === "core.launch_project" && e.user_name === "Copilot (MCP)")).toBe(true); // the draft it created
+  });
+
+  it("plant tools are read-only, answer from the same data as the web app, and write nothing", async () => {
+    const by = Object.fromEntries((await c.listTools()).tools.map((t) => [t.name, t]));
+    for (const n of ["get_plant_status", "get_seal_risk", "get_filler_health", "get_launch_line_context"]) expect(by[n].annotations?.readOnlyHint, n).toBe(true);
+    const plant = data(await c.callTool({ name: "get_plant_status", arguments: {} }));
+    expect(plant.lines.find((l: any) => l.line === "L1").state).toBe("Attention");
+    const seals = data(await c.callTool({ name: "get_seal_risk", arguments: { line: "L1", level: "High", limit: 3 } }));
+    expect(seals.seals.length).toBeGreaterThan(0);
+    expect(seals.seals.every((s: any) => s.level === "High" && s.line === "L1")).toBe(true);
+    expect(seals.seals[0].why).toMatch(/Score/);
+    const fh = data(await c.callTool({ name: "get_filler_health", arguments: { line: "L1" } }));
+    expect(fh.stations[0].station).toBe("V3");
+    expect((await c.callTool({ name: "get_filler_health", arguments: { line: "L99" } })).isError).toBe(true);
+    const ctx = data(await c.callTool({ name: "get_launch_line_context", arguments: { launch: code } }));
+    expect(ctx.line).toBeTruthy();
+    expect(Array.isArray(ctx.advice)).toBe(true);
   });
 
   it("rejects unknown launches with a helpful message", async () => {

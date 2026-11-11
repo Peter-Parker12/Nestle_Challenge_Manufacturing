@@ -9,7 +9,7 @@ import { models, toolLoop } from "./client";
  * Read-only tools, row-capped. It can recommend; it has no tool that changes anything. Troubleshooting steps come only from the guides.
  * Answers cite [A:alarm code], [G:guide code] and [P:part code]; each citation is checked against what the tools returned.
  */
-const TOOLS = [
+export const FILLER_TOOLS = [
   { name: "get_health", description: "Prioritised health of the filler: KPIs and every station ranked by attention score, with the evidence, stop prediction, linked seal and next actions. Call this first for any 'what is wrong' or 'what should I do' question.",
     input_schema: { type: "object", properties: { filler: { type: "string", description: "Line code such as L1. Omit for the current filler." } } } },
   { name: "get_station", description: "Detail for one station: alarms by code (30 days), breakdowns, open maintenance, settings with approved limits, seals in the assembly and matching troubleshooting guides with their steps.",
@@ -34,7 +34,7 @@ async function resolveFiller(code?: string) {
   return fillers.find((f) => f.line_code === code) ?? fillers[0];
 }
 
-async function run(name: string, input: any, fillerId: string) {
+export async function run(name: string, input: any, fillerId: string) {
   const f = input?.filler ? await resolveFiller(String(input.filler)) : { id: fillerId };
   if (name === "get_health") {
     const h = await fillerHealth(f.id);
@@ -68,6 +68,15 @@ async function run(name: string, input: any, fillerId: string) {
   return { error: "Unknown tool" };
 }
 
+/** Every [A:..] [G:..] [P:..] [L:..] tag must appear in something a tool returned (whole-token match). */
+export function checkCitations(text: string, toolCalls: { output: unknown }[]) {
+  const seen = JSON.stringify(toolCalls.map((t) => t.output));
+  return [...text.matchAll(/\[(A|G|P|L):([A-Za-z0-9._-]+)\]/g)].map((m) => ({
+    tag: m[0], kind: m[1], id: m[2],
+    valid: new RegExp(`(^|[^A-Za-z0-9._-])${m[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9._-]|$)`).test(seen),
+  }));
+}
+
 export const chatInput = z.object({
   messages: z.array(z.object({ role: z.enum(["user", "assistant"]), content: z.string().max(2000) })).min(1).max(12),
   filler: z.string().uuid().optional(),
@@ -81,12 +90,10 @@ export async function askFiller(userId: string, input: z.infer<typeof chatInput>
   const history = input.messages.slice(0, -1).map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`).join("\n");
   const question = (history ? `Conversation so far:\n${history}\n\n` : "") + `<data>${last.content}</data>`;
   const out = await toolLoop({
-    purpose: "hey_filler", model: models.main(), system: SYSTEM(`${f.line_code}/${f.code}`), question, tools: TOOLS as any, userId, maxRounds: 5,
+    purpose: "hey_filler", model: models.main(), system: SYSTEM(`${f.line_code}/${f.code}`), question, tools: FILLER_TOOLS as any, userId, maxRounds: 5,
     run: (name, i) => run(name, i, f.id), inputRefs: { filler: f.id },
   });
-  // every citation must appear in something a tool returned
-  const seen = JSON.stringify(out.toolCalls.map((t) => t.output));
-  const cites = [...out.text.matchAll(/\[(A|G|P):([A-Za-z0-9._-]+)\]/g)].map((m) => ({ tag: m[0], kind: m[1], id: m[2], valid: new RegExp(`(^|[^A-Za-z0-9._-])${m[2].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9._-]|$)`).test(seen) }));
+  const cites = checkCitations(out.text, out.toolCalls);
   return {
     text: out.text, citations: cites, invalid: cites.filter((c) => !c.valid).map((c) => c.tag),
     tools: out.toolCalls.map((t) => t.name),

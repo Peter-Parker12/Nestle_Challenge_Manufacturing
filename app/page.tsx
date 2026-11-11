@@ -4,6 +4,8 @@ import { PosLink } from "@/components/assetUi";
 import { plantOverview } from "@/lib/assets";
 import { riskBoard } from "@/lib/risk";
 import { fillerHealth, listFillers } from "@/lib/linehealth";
+import LineTable from "@/components/LineTable";
+import { plantStatus } from "@/lib/plant";
 import { dashboardKpis, listLaunches } from "@/lib/repo";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +15,7 @@ export default async function Dashboard() {
   const plant = await plantOverview();
   const pk = plant.kpis;
   const risk = await riskBoard();
+  const status = await plantStatus();
   const fillers = await listFillers();
   const fh = fillers[0] ? await fillerHealth(fillers[0].id) : null;
   const watch = risk.ranked.filter((r) => r.result.level !== "Low").slice(0, 8);
@@ -36,6 +39,14 @@ export default async function Dashboard() {
       <p className="sub">
         One place for the plant&apos;s questions: what to start a new launch with, which seals and gaskets need attention, and what is wrong with the filler. The numbers come from code and history; Claude explains and answers with citations; people decide.
       </p>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h2 style={{ margin: 0 }}>Lines today</h2>
+          <Link className="btn ghost small" href="/plant">Ask the plant</Link>
+        </div>
+        <LineTable lines={status.lines} />
+      </div>
 
       <div className="modgrid" style={{ marginBottom: 14 }}>
         <div className="mod">

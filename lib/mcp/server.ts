@@ -5,6 +5,9 @@ import { askHistory, explainRecommendation } from "../ai/features";
 import { HttpError } from "../auth";
 import { q, q1 } from "../db";
 import { type Action, can, type Role } from "../permissions";
+import { fillerHealth, listFillers } from "../linehealth";
+import { launchLineContext, plantStatus } from "../plant";
+import { riskBoard, summarise } from "../risk";
 import {
   createLaunch, createRecommendation, dashboardKpis, getLaunchDetail, listCategories, listLaunches, listLines, loadCategoryConfig, previewRecommendation,
 } from "../repo";
@@ -29,7 +32,7 @@ export function buildServer(ctx: McpCtx): McpServer {
   const server = new McpServer({ name: "launch-accelerator", version: "1.0.0" }, {
     instructions:
       "Launch Accelerator (BAF-1) recommends a starting recipe and process window for new product launches from similar past launches. " +
-      "Start with get_category_setup to learn the fields and units. Use create_launch to draft a launch and recommend to request a proposal. " +
+      "Start with get_category_setup to learn the fields and units. For plant questions use get_plant_status, get_seal_risk and get_filler_health (read-only). Use create_launch to draft a launch and recommend to request a proposal. " +
       "Recommendations are proposals: a person must review and approve them in the web app, using the link returned. Never claim a plan is approved.",
   });
 
@@ -240,6 +243,52 @@ export function buildServer(ctx: McpCtx): McpServer {
       history_before_the_tool: g(false), launches_that_used_a_recommendation: g(true), open_launches_by_status: k.open,
       recommendations: k.usage, caution: "Small samples are not evidence. Treat the comparison as pilot tracking only.",
     };
+  });
+
+  /* ---- plant: seals and filler health (read-only) ---- */
+  add("get_plant_status", {
+    title: "Get the plant status",
+    description: "Status of every line across launches, seals and gaskets, and filler health: Attention / Watch / OK with reasons, seals at High risk, the filler station needing attention, next planned stop and open launches. Read-only.",
+    schema: {},
+  }, async () => {
+    const { lines, asOf } = await plantStatus();
+    return { as_of: asOf, lines: lines.map((l) => ({ line: l.code, state: l.state, reasons: l.reasons, seals_high: l.seals.high, high_without_planned_stop: l.seals.highWithoutStop, filler_station: l.filler ? { name: l.filler.station, level: l.filler.level, score: l.filler.score, prediction: l.filler.prediction } : null, next_planned_stop: l.nextStop, open_launches: l.launches.map((x) => x.code) })), see: `${ctx.baseUrl}/plant` };
+  });
+
+  add("get_seal_risk", {
+    title: "Get seal and gasket risk",
+    description: "Seals and gaskets ranked by risk score (0-100) with the main factors, the date the seal is projected to reach High, and the recommended planned stop. The score is a rule-based estimate from this plant's own history, not a certainty. Alerts are acknowledged and planned by people in the web app.",
+    schema: { line: z.string().max(20).optional().describe("Line code such as L1"), level: z.enum(["High", "Medium", "Low"]).optional(), limit: z.number().int().min(1).max(30).default(10) },
+  }, async ({ line, level, limit }) => {
+    const r = await riskBoard();
+    const rows = r.ranked.filter((x) => (!line || x.lineCode.toLowerCase() === line.toLowerCase()) && (!level || x.result.level === level)).slice(0, limit);
+    return { counts: r.counts, engine: r.engineVersion, seals: rows.map((x) => ({ line: x.lineCode, position: `${x.assembly} · ${x.positionName}`, part: x.partCode, score: x.result.score, level: x.result.level, reaches_high_on: x.projectedHighOn, recommended_stop: x.recommendedStop, why: summarise(x, x.projectedDays), url: `${ctx.baseUrl}/assets/positions/${x.positionId}` })), see: `${ctx.baseUrl}/risk` };
+  });
+
+  add("get_filler_health", {
+    title: "Get filler health",
+    description: "Prioritised health of the filler: KPIs against usual, every station ranked by attention score with the evidence, stop prediction (a trend from earlier stops, not a trained model), linked seal and next actions. Read-only: a person changes settings on the machine.",
+    schema: { line: z.string().max(20).optional().describe("Line code such as L1. Defaults to the first filler.") },
+  }, async ({ line }) => {
+    const fillers = await listFillers();
+    const f = line ? fillers.find((x: any) => x.line_code.toLowerCase() === line.toLowerCase()) : fillers[0];
+    if (!f) throw new HttpError(404, `No filler on line "${line}".`, "not_found");
+    const h = await fillerHealth(f.id);
+    return {
+      filler: `${h.filler.line_code}/${h.filler.code}`, kpis_last_7_days_vs_usual: h.kpis,
+      stations: h.stations.slice(0, 6).map((s) => ({ station: s.code, name: s.name, score: s.score, level: s.level, top_alarm: s.topAlarm, stop_prediction: s.prediction.text, seal: s.seal, next_actions: s.actions.map((a) => a.text) })),
+      see: `${ctx.baseUrl}/line-health?filler=${f.id}`,
+    };
+  });
+
+  add("get_launch_line_context", {
+    title: "Get the line context for a launch",
+    description: "What the launch's line looks like right now: status, seals at High risk, filler station needing attention, planned stops, and plain advice for whoever plans the trial. Information only; it does not change the launch.",
+    schema: { launch: z.string().min(3).max(60).describe("Launch code such as L-1060") },
+  }, async ({ launch }) => {
+    const c = await launchLineContext(await launchId(launch));
+    if (!c) throw new HttpError(404, "No line context for this launch.", "not_found");
+    return { launch: c.launch, line: c.line.code, state: c.line.state, reasons: c.line.reasons, next_planned_stop: c.line.nextStop, advice: c.advice };
   });
 
   return server;

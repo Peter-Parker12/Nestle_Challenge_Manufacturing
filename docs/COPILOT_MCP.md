@@ -26,6 +26,10 @@ The app includes an **MCP server** so Microsoft Copilot (Copilot Studio) and oth
 | `preview_weights` | What-if: how the result changes with different weights. Saves nothing | No |
 | `ask_history` | Questions about past launches, answered by Claude with checked citations. Needs the Claude API | No |
 | `get_dashboard` | Headline figures | No |
+| `get_plant_status` | Every line: Attention / Watch / OK with reasons (seals, filler, stops, launches) | No |
+| `get_seal_risk` | Seals ranked by explained risk score, projected date of High, recommended stop | No |
+| `get_filler_health` | Filler stations ranked with evidence, stop trend and next actions | No |
+| `get_launch_line_context` | What the launch's line looks like now, with advice for planning the trial | No |
 
 **Copilot cannot** approve, reject or edit a plan, enter or review run results, record technical acceptance, change weights, product fields or process setup, import data, or cancel a launch. Those tools do not exist on this server, so no instruction to Copilot can make it do them. Every tool that writes returns a link to the launch so a person can review and decide in the web app. This keeps the rule that nothing is auto-approved.
 
@@ -64,7 +68,7 @@ curl -s $URL -H "Authorization: Bearer $KEY" -H "Content-Type: application/json"
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-You should see the nine tools. The automated suite does the same through the official client: `API_BASE=… MCP_API_KEY=… npx vitest run tests/mcp.int.test.ts`.
+You should see the thirteen tools. The automated suite does the same through the official client: `API_BASE=… MCP_API_KEY=… npx vitest run tests/mcp.int.test.ts`.
 
 ### 3. Add it to a Copilot Studio agent
 

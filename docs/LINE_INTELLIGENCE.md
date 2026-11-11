@@ -7,7 +7,7 @@ One app, one link (port 9361). Three use cases share one asset model, one calend
 | BAF-1 Launch | What do we start a new product with? | Built |
 | BAF-2 Seals and gaskets | Which seals need attention, and when? | Phases 1 and 2 built (record, history, calendar, exposure ledger, explained risk score, alerts, photo inspection) |
 | DNF-2 Line health | What is wrong with the filler, what do I do? | Phase 3 built (filler health, stoppage trend, guides, Hey Filler chat) |
-| Combined | Line-health banner in launches, "Ask the plant", MCP tools | Phase 4 |
+| Combined | Lines today, line banner in launches, "Ask the plant", MCP tools | Phase 4 built |
 
 ## Phase 1: what exists
 
@@ -25,7 +25,6 @@ One app, one link (port 9361). Three use cases share one asset model, one calend
 - No risk score or alerts: the overview lists seals past planned life or rated poor, a plain filter.
 - Planned life is a planning figure per seal type, not a prediction.
 - Photos, exposure data (runtime, temperature, pressure, CIP), alarms and KPIs come in phases 2 and 3.
-- MCP tools and "Ask the plant" do not cover assets yet (phase 4).
 - Vietnamese interface not built.
 
 Tests: `tests/assets.int.test.ts` (9, needs a running server, `DATABASE_URL`, fresh seed).
@@ -67,3 +66,16 @@ Not yet: photo assessment untested against real Claude (mock only); alerts do no
 
 Tests: `tests/health-engine.test.ts`, `tests/health.int.test.ts` (needs the mock Claude).
 Not yet: no import for alarm or PLC data (the demo data is seeded); no real PLC or historian connection (read-only integration is a phase for Nestlé IT/OT); voice input not built; the Vietnamese answers are untested with real Claude; one filler per page, no multi-filler comparison; guides are written by hand, not extracted from manuals.
+
+## Phase 4: the three modules together (built)
+
+**Line status** (`lib/plant.ts`, read-only): one row per line joining the modules. State is Attention (the filler's worst station is High, or any seal is High), Watch (Medium) or OK, with the reasons in plain text: seals at High risk and how many have no planned stop, the filler station needing attention, the next planned stop, the open launches. Shown on the Overview ("Lines today") and on `/plant`. It informs; it never blocks or changes anything.
+
+**Banner in a launch**: an open launch shows the state of its own line above the workflow, with plain advice: check the filler first if a station is High; seals at High risk without a planned stop should be changed in the next stop; a planned stop within 21 days is something to plan trial runs around. Closed and cancelled launches show nothing. The banner does not change the launch, its recommendation or its approval.
+
+**Ask the plant** (`/plant`, `lib/ai/plant.ts`): one chat across launches, seals and the filler, English or Vietnamese. Read-only tools (plant status, seal risk, launch with its line context, filler health, station, guides). Citations are [L:launch], [P:part], [A:alarm], [G:guide] and each one is checked against what the tools returned; unverifiable ones show in red. It cannot approve, schedule, change a setting or close an alert.
+
+**Copilot (MCP)**: four read-only tools added to the original nine, thirteen in all: `get_plant_status`, `get_seal_risk`, `get_filler_health`, `get_launch_line_context`. No tool acknowledges alerts, plans stops, records inspections or corrections; those stay with people in the web app.
+
+Tests: `tests/plant.int.test.ts` (5, needs the mock Claude) and the MCP suite (16, now covers the plant tools and checks that none are writable).
+Not yet: real Claude answers untested (mock only); no notifications; the line status is computed on request from current data (no history of line status); one filler per line.

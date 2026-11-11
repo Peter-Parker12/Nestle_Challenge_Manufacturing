@@ -21,7 +21,7 @@ One Next.js application serves the UI and the JSON API. PostgreSQL holds all sta
 
 ## Copilot (MCP)
 
-A second front door to the same repository and engine: `/mcp` serves nine MCP tools to Microsoft Copilot over Streamable HTTP. It runs as a fixed service account, checks that account's role on every tool, and exposes no tool that approves, decides or changes setup. See `COPILOT_MCP.md`.
+A second front door to the same repository and engine: `/mcp` serves thirteen MCP tools (nine for launches, four read-only for the plant) to Microsoft Copilot over Streamable HTTP. It runs as a fixed service account, checks that account's role on every tool, and exposes no tool that approves, decides or changes setup. See `COPILOT_MCP.md`.
 
 ## Principles
 

@@ -27,7 +27,7 @@ This test found and fixed a real bug: `date` columns were converted through the 
 
 ## MCP checks done by hand
 
-Raw JSON-RPC against the running server: `initialize` and `tools/list` return plain JSON with the nine tools; a bad launch code is a readable tool error; an unknown tool and out-of-range input are rejected; with `MCP_SERVICE_ROLE=viewer` the service account reads but is refused `create_launch` and `recommend` (and the database row shows role viewer, inactive); with `MCP_RATE_LIMIT_PER_MIN=5` the sixth call in a minute gets 429; with no `MCP_API_KEY` the endpoint answers 503 and `/api/health` shows `mcp: false`.
+Raw JSON-RPC against the running server: `initialize` and `tools/list` return plain JSON with the thirteen tools; a bad launch code is a readable tool error; an unknown tool and out-of-range input are rejected; with `MCP_SERVICE_ROLE=viewer` the service account reads but is refused `create_launch` and `recommend` (and the database row shows role viewer, inactive); with `MCP_RATE_LIMIT_PER_MIN=5` the sixth call in a minute gets 429; with no `MCP_API_KEY` the endpoint answers 503 and `/api/health` shows `mcp: false`.
 
 Not tested: a real Copilot Studio agent.
 
