@@ -5,7 +5,7 @@ One app, one link (port 9361). Three use cases share one asset model, one calend
 | Module | Question | Status |
 |---|---|---|
 | BAF-1 Launch | What do we start a new product with? | Built |
-| BAF-2 Seals and gaskets | Which seals need attention, and when? | Phase 1 built (record, history, calendar). Phase 2: exposure ledger, explained risk score, alerts, photo inspection |
+| BAF-2 Seals and gaskets | Which seals need attention, and when? | Phases 1 and 2 built (record, history, calendar, exposure ledger, explained risk score, alerts, photo inspection) |
 | DNF-2 Line health | What is wrong with the filler, what do I do? | Phase 3 |
 | Combined | Line-health banner in launches, "Ask the plant", MCP tools | Phase 4 |
 
@@ -29,3 +29,20 @@ One app, one link (port 9361). Three use cases share one asset model, one calend
 - Vietnamese interface not built.
 
 Tests: `tests/assets.int.test.ts` (9, needs a running server, `DATABASE_URL`, fresh seed).
+
+## Phase 2: seal risk (built)
+
+**Exposure ledger** (`ast.exposure`): one row per equipment per week: run hours, CIP cycles, average and maximum temperature and pressure. Aggregates only, loaded by import or an interface later. Seal types carry their ratings (run hours, CIP cycles, temperature, pressure); a missing rating leaves that factor out.
+
+**Risk score** (`lib/engine/seal.ts`, pure, 11 unit tests): nine factors, each 0 to 1 (age, run hours, CIP cycles, weeks above rated temperature, weeks above rated pressure, last inspection, time since inspection, earlier failures at the position, incidents in 12 months). Score = engineers' weights (0 to 5) share × criticality multiplier (0.7 + 0.1 × criticality), capped at 100, then expert floors (F1 rated damaged/failed ≥ 75; F2 foreign body in 30 days and past planned life ≥ 85; F3 beyond 1.5× planned life ≥ 70). Levels: High ≥ 70, Medium ≥ 40. Missing data is listed, never guessed. Every factor, weight and point is shown on the position page.
+
+**Projection**: days until the score first reaches High at the recent (8-week) rate of use, matched to the planned-stop calendar (last window before that date, or the first window if already High, or "plan one earlier").
+
+**Alerts** (`ast.alert`): raised by Refresh when a seal is High or projected High within 45 days. States New, Acknowledged, Planned (needs a stop on the same line), Deferred (needs reason and date), Dismissed (needs reason), Done (only after the seal is replaced; set automatically on refresh). A seal rated damaged or failed, or with a foreign body in the last 30 days, cannot be dismissed (database rule BR-S4). Daily snapshots keep the breakdown behind every score.
+
+**Photo inspection** (`lib/ai/vision.ts`): an inspector attaches a photo; Claude gives an advisory rating and findings, stored server-side and tied to the photo's hash. One-way rule (BR-S5, in the database): the assessment can raise concern, a lower rating needs a written reason. The photo is stored and served back; the AI call log keeps only the hash.
+
+**Backtest**: re-scores every removed seal as the data stood 30 days earlier and compares with a simple age-only rule. On the demo data the failures are synthetic and random, so the result says nothing about the real plant; run it on real history before trusting the weights.
+
+Tests: `tests/seal-engine.test.ts`, `tests/risk.int.test.ts` (needs the mock Claude; see header).
+Not yet: photo assessment untested against real Claude (mock only); alerts do not notify anyone (no email or Teams); weights are global, not per equipment.

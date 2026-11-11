@@ -15,6 +15,8 @@ export default function PositionActions({ role, positionId, hasSeal, partTypes, 
   const [open, setOpen] = useState<"replace" | "inspect" | "incident" | null>(null);
   const [msg, setMsg] = useState<Msg>(null);
   const [busy, setBusy] = useState(false);
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [ai, setAi] = useState<{ analysisId: string; rating: number; findings: string; confidence: string } | null>(null);
   const [f, setF] = useState<any>({ partCode: nextCode, partTypeId: defaultTypeId ?? partTypes[0]?.id ?? "", lot: "", date: today(), reason: "planned_replacement", note: "", rating: "2", finding: "", kind: "foreign_body", severity: "Minor", description: "" });
   const set = (k: string, v: string) => setF((x: any) => ({ ...x, [k]: v }));
 
@@ -25,6 +27,29 @@ export default function PositionActions({ role, positionId, hasSeal, partTypes, 
     if (!r.ok) return setMsg({ kind: "err", text: r.message ?? "Failed" });
     setMsg({ kind: "ok", text: ok }); setOpen(null); router.refresh();
   }
+  async function analyse() {
+    if (!photo) return;
+    setBusy(true); setMsg(null); setAi(null);
+    const form = new FormData(); form.append("photo", photo);
+    const r = await api("/api/assets/photo-analyse", { form });
+    setBusy(false);
+    if (!r.ok) return setMsg({ kind: "err", text: r.message ?? "The photo could not be assessed. You can still rate the seal yourself." });
+    if (!r.data.usable) return setMsg({ kind: "err", text: `The photo is not usable: ${r.data.findings}` });
+    setAi(r.data);
+    setF((x: any) => ({ ...x, rating: String(Math.max(Number(x.rating), r.data.rating)), finding: x.finding || r.data.findings }));
+  }
+  async function saveInspection() {
+    setBusy(true); setMsg(null);
+    const form = new FormData();
+    form.append("inspectedOn", f.date); form.append("rating", f.rating); if (f.finding) form.append("finding", f.finding);
+    if (photo) form.append("photo", photo);
+    if (ai) { form.append("analysisId", ai.analysisId); if (f.override) form.append("overrideReason", f.override); }
+    const r = await api(`/api/assets/positions/${positionId}/inspection`, { form });
+    setBusy(false);
+    if (!r.ok) return setMsg({ kind: "err", text: r.message ?? "Failed" });
+    setMsg({ kind: "ok", text: "Inspection recorded." }); setOpen(null); setPhoto(null); setAi(null); router.refresh();
+  }
+  const lowered = !!ai && Number(f.rating) < ai.rating;
   const canWork = can(role, "recordSealWork"), canInspect = can(role, "recordInspection"), canIncident = can(role, "recordIncident");
   if (!canWork && !canInspect && !canIncident) return <div className="msg info">Your role can read this position. Maintenance records seal changes and inspections.</div>;
 
@@ -54,7 +79,17 @@ export default function PositionActions({ role, positionId, hasSeal, partTypes, 
           <div className="field"><label htmlFor="d2">Inspection date</label><input id="d2" type="date" max={today()} value={f.date} onChange={(e) => set("date", e.target.value)} /></div>
           <div className="field"><label htmlFor="rt">Condition</label><select id="rt" value={f.rating} onChange={(e) => set("rating", e.target.value)}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n} · {RATING[n]}</option>)}</select></div>
           <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="fn">What you see (optional)</label><input id="fn" value={f.finding} onChange={(e) => set("finding", e.target.value)} /></div>
-          <div><button disabled={busy} onClick={() => send({ action: "inspect", inspectedOn: f.date, rating: Number(f.rating), finding: f.finding || undefined }, "Inspection recorded.")}>Save inspection</button></div>
+          <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="ph">Photo (optional, JPEG, PNG or WebP, up to 4 MB)</label>
+            <div className="row"><input id="ph" type="file" accept="image/jpeg,image/png,image/webp" style={{ maxWidth: 320 }} onChange={(e) => { setPhoto(e.target.files?.[0] ?? null); setAi(null); }} />
+              <button type="button" className="ghost small" disabled={!photo || busy} onClick={analyse}>Assess the photo with AI</button></div></div>
+          {ai && (
+            <div className="quote" style={{ gridColumn: "1 / -1" }}>
+              <strong>AI assessment (advisory): {ai.rating} · {RATING[ai.rating]}</strong> <span className="small muted">confidence {ai.confidence}</span>
+              <div className="small">{ai.findings}</div>
+              <div className="small muted">The assessment can raise your rating, never lower it. You decide, and recording a lower rating needs a reason.</div>
+            </div>)}
+          {lowered && <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="ov">Why is your rating lower than the photo assessment? (required)</label><input id="ov" value={f.override ?? ""} onChange={(e) => set("override", e.target.value)} /></div>}
+          <div><button disabled={busy || (lowered && (f.override ?? "").trim().length < 5)} onClick={saveInspection}>Save inspection</button></div>
         </div>
       )}
       {open === "incident" && (

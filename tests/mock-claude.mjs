@@ -35,7 +35,12 @@ http.createServer((req, res) => {
         quality: [{ code: "viscosity_cp", value: 38.4 }, { code: "sediment_pct", value: 0.31 }, { code: "creaming_idx", value: 1.2 }, { code: "ph", value: 6.7 }],
         product_fields: [{ code: "pack_type", value: "pouch", source_quote: "Packed in pouches" }, { code: "organic", value: "maybe", source_quote: "organic?" }],
         loss_kg: 75, notes: "Imported" } }], "tool_use");
-    else if (tool === "propose_rules")
+    else if (tool === "assess_seal_photo") {
+      const blurry = all.includes("QkxVUg"); // base64 of "BLUR" at the start of the fake photo
+      out = reply([{ type: "tool_use", id: "t1", name: tool, input: blurry
+        ? { usable: false, rating: 1, findings: "Photo is blurred", confidence: "low" }
+        : { usable: true, rating: 4, findings: "Chipped edge on the sealing lip, a fragment could come off.", confidence: "medium" } }], "tool_use");
+    } else if (tool === "propose_rules")
       out = reply([{ type: "tool_use", id: "t1", name: tool, input: { rules: [{ attr: "fat_pct", op: ">", value: 2.8, severity: "Medium", message: "Fat above 2.8%: more rework seen.", rationale: "Rework rate rises in the top band.", evidence_codes: ["L-1001", "L-1002"] }] } }], "tool_use");
     else if (!tool && body.tools?.length) {
       // history Q&A: first turn asks for a tool, second turn answers

@@ -33,6 +33,7 @@ export default async function Passport({ params }: { params: Promise<{ id: strin
               <div className="d">{e.date}</div>
               <div><strong>{e.title}</strong></div>
               {e.detail && <div className="small muted">{e.detail}</div>}
+              {e.photoId && <div><a className="small" href={`/api/assets/inspections/${e.photoId}/photo`} target="_blank" rel="noreferrer">View photo</a></div>}
             </li>
           ))}
         </ul>

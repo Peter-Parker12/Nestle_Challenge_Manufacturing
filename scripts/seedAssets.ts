@@ -3,13 +3,13 @@ import type { Client } from "pg";
 import { gauss, rng } from "../lib/rng";
 
 const PART_TYPES = [
-  { code: "EPDM-FV", name: "Filling valve plug seal", material: "EPDM", supplier: "Supplier A (synthetic)", life: 180 },
-  { code: "SIL-GK", name: "Valve body gasket", material: "Silicone", supplier: "Supplier B (synthetic)", life: 270 },
-  { code: "FKM-PS", name: "Homogeniser piston seal", material: "FKM", supplier: "Supplier A (synthetic)", life: 150 },
-  { code: "PTFE-DIA", name: "UHT valve diaphragm", material: "PTFE / EPDM", supplier: "Supplier C (synthetic)", life: 365 },
-  { code: "EPDM-CIP", name: "CIP cup seal", material: "EPDM", supplier: "Supplier A (synthetic)", life: 240 },
-  { code: "EPDM-MW", name: "Manway gasket", material: "EPDM", supplier: "Supplier B (synthetic)", life: 360 },
-  { code: "SIL-SG", name: "Sight glass gasket", material: "Silicone", supplier: "Supplier B (synthetic)", life: 300 },
+  { code: "EPDM-FV", name: "Filling valve plug seal", material: "EPDM", supplier: "Supplier A (synthetic)", life: 180, run: 2700, cip: 77, temp: 120, press: null },
+  { code: "SIL-GK", name: "Valve body gasket", material: "Silicone", supplier: "Supplier B (synthetic)", life: 270, run: 4050, cip: 115, temp: 200, press: null },
+  { code: "FKM-PS", name: "Homogeniser piston seal", material: "FKM", supplier: "Supplier A (synthetic)", life: 150, run: 2250, cip: null, temp: 200, press: 250 },
+  { code: "PTFE-DIA", name: "UHT valve diaphragm", material: "PTFE / EPDM", supplier: "Supplier C (synthetic)", life: 365, run: 5500, cip: 150, temp: 140, press: 10 },
+  { code: "EPDM-CIP", name: "CIP cup seal", material: "EPDM", supplier: "Supplier A (synthetic)", life: 240, run: 3600, cip: 103, temp: 110, press: null },
+  { code: "EPDM-MW", name: "Manway gasket", material: "EPDM", supplier: "Supplier B (synthetic)", life: 360, run: 5400, cip: 154, temp: 120, press: null },
+  { code: "SIL-SG", name: "Sight glass gasket", material: "Silicone", supplier: "Supplier B (synthetic)", life: 300, run: 4500, cip: 128, temp: 200, press: null },
 ];
 
 const FINDINGS: Record<number, string[]> = {
@@ -24,7 +24,7 @@ export async function seedAssets(c: Client, o: { lines: { id: string; code: stri
   const ins = async (sql: string, p: unknown[] = []) => (await c.query(sql, p)).rows[0];
   const types: Record<string, { id: string; life: number }> = {};
   for (const t of PART_TYPES)
-    types[t.code] = { life: t.life, id: (await ins("insert into ast.part_type(code,name,material,supplier,nominal_life_days) values ($1,$2,$3,$4,$5) returning id", [t.code, t.name, t.material, t.supplier, t.life])).id };
+    types[t.code] = { life: t.life, id: (await ins("insert into ast.part_type(code,name,material,supplier,nominal_life_days,nominal_run_hours,nominal_cip_cycles,max_temp_c,max_pressure_bar) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id", [t.code, t.name, t.material, t.supplier, t.life, t.run, t.cip, t.temp, t.press])).id };
   if (!o.history) return { positions: 0, parts: 0 };
 
   const r = rng(20261111);
@@ -88,12 +88,14 @@ export async function seedAssets(c: Client, o: { lines: { id: string; code: stri
           const when = s.start + Math.max(1, Math.round(span * f));
           if (when > 0) continue;
           const wear = (when - s.start) / T.life;
-          const rating = Math.min(5, Math.max(1, Math.round(1 + wear * 3 + 0.5 * gauss(r)))) as 1 | 2 | 3 | 4 | 5;
+          const rating = Math.min(5, Math.max(1, Math.round(1 + wear * 2.3 + 0.45 * gauss(r)))) as 1 | 2 | 3 | 4 | 5;
           const text = FINDINGS[Math.min(rating, s.reason === "failure" ? 5 : 4)];
           await c.query("insert into ast.inspection(installation_id,inspected_on,rating,finding,inspector_id) values ($1,$2,$3,$4,$5)", [inst, day(when), rating, text[Math.floor(r() * text.length)], r() < 0.7 ? maint : qa]);
         }
         if (s.end !== null) {
           if (s.reason === "failure") {
+            const lead = 20 + Math.floor(r() * 25);
+            if (span > 50 && r() < 0.8) await c.query("insert into ast.inspection(installation_id,inspected_on,rating,finding,inspector_id) values ($1,$2,$3,$4,$5)", [inst, day(s.end - lead), r() < 0.5 ? 3 : 4, pick(r, FINDINGS[3]), maint]);
             await c.query("insert into ast.inspection(installation_id,inspected_on,rating,finding,inspector_id) values ($1,$2,5,$3,$4)", [inst, day(s.end), pick(r, FINDINGS[5]), maint]);
             if (r() < 0.85) await c.query("insert into ast.incident(position_id,installation_id,occurred_on,kind,severity,description,reported_by) values ($1,$2,$3,$4,$5,$6,$7)",
               [pid, inst, day(s.end), p.crit >= 4 && r() < 0.5 ? "foreign_body" : "seal_failure", "Major", "Found at the stop. Seal replaced.", maint]);
@@ -111,6 +113,24 @@ export async function seedAssets(c: Client, o: { lines: { id: string; code: stri
     }
   }
 
+  // exposure ledger: one row per equipment per week for the last ~58 weeks (synthetic, with realistic variation)
+  const monday = (offset: number) => { const d = new Date(base.getTime() + offset * 86400000); const dow = (d.getUTCDay() + 6) % 7; return new Date(d.getTime() - dow * 86400000).toISOString().slice(0, 10); };
+  const eqRows = await c.query("select e.id, e.code, l.code as line from ast.equipment e join cfg.line l on l.id=e.line_id");
+  for (const e of eqRows.rows) {
+    for (let w = 58; w >= 0; w--) {
+      const wk = monday(-w * 7);
+      if (wk > day(0)) continue;
+      const hot = e.line === "L1";
+      let run = 98 + r() * 18, cip = 3, avgT = 24, maxT = 85 + r() * 10, avgP = 3 + r(), maxP = 4 + r() * 2;
+      if (e.code === "FL" && r() < (hot ? 0.14 : 0.03)) maxT = 121 + r() * 6;
+      if (e.code === "HM") { cip = 2; avgT = 60; maxT = 72 + r() * 6; avgP = 185 + r() * 45; maxP = avgP + 12 + r() * 25; if (r() < 0.1) run = 60 + r() * 20; }
+      if (e.code === "UV") { avgT = 130; maxT = (hot ? 134 : 133) + r() * (hot ? 9.5 : 6); avgP = 5 + r() * 3; maxP = avgP + 1 + r() * 2.2; }
+      if (r() < 0.06) { run = 40 + r() * 30; cip += 1; }   // a short week
+      await c.query("insert into ast.exposure(equipment_id,week_start,run_hours,cip_cycles,avg_temp_c,max_temp_c,avg_pressure_bar,max_pressure_bar,source) values ($1,$2,$3,$4,$5,$6,$7,$8,'synthetic')",
+        [e.id, wk, round1(run), cip, round1(avgT), round1(maxT), round1(avgP), round1(maxP)]);
+    }
+  }
+
   // planned stops: weekly CIP, changeovers and a few maintenance windows, past and future
   for (const line of o.lines.filter((l) => l.code === "L1" || l.code === "L2")) {
     const off = line.code === "L1" ? 0 : 2;
@@ -124,4 +144,5 @@ export async function seedAssets(c: Client, o: { lines: { id: string; code: stri
   return { positions: nPos, parts: nParts };
 }
 
+const round1 = (n: number) => Math.round(n * 10) / 10;
 function pick<T>(r: () => number, a: T[]) { return a[Math.floor(r() * a.length)]; }

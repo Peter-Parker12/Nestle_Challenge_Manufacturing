@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { badge } from "@/components/api";
-import { Life, PosLink, RATING, ratingClass } from "@/components/assetUi";
+import { PosLink } from "@/components/assetUi";
 import { plantOverview } from "@/lib/assets";
+import { riskBoard } from "@/lib/risk";
 import { dashboardKpis, listLaunches } from "@/lib/repo";
 
 export const dynamic = "force-dynamic";
@@ -10,9 +11,8 @@ export default async function Dashboard() {
   const k = await dashboardKpis();
   const plant = await plantOverview();
   const pk = plant.kpis;
-  const watch = (plant.positions as any[])
-    .filter((p) => (p.age_days != null && p.age_days > p.nominal_life_days) || (p.last_rating ?? 0) >= 4)
-    .sort((a, b) => (b.age_days / b.nominal_life_days || 0) - (a.age_days / a.nominal_life_days || 0)).slice(0, 8);
+  const risk = await riskBoard();
+  const watch = risk.ranked.filter((r) => r.result.level !== "Low").slice(0, 8);
   const launches = (await listLaunches()) as any[];
   const open = launches.filter((l) => !["Closed", "Cancelled"].includes(l.status));
   const base = k.groups.find((g: any) => g.used === false);
@@ -44,8 +44,8 @@ export default async function Dashboard() {
         <div className="mod">
           <div className="tag">BAF-2 · SEALS AND GASKETS</div>
           <h3>Foreign-body prevention</h3>
-          <div className="small muted">Every seal with its history, age and inspections. Risk scoring and alerts follow in phase 2.</div>
-          <p style={{ margin: "10px 0 0" }}><strong>{pk.positions}</strong> positions · <strong>{pk.beyond_nominal}</strong> past planned life · <Link href="/assets">Plant map</Link></p>
+          <div className="small muted">Every seal with its history, an explained risk score, alerts and the stop to change it in.</div>
+          <p style={{ margin: "10px 0 0" }}><strong>{pk.positions}</strong> positions · <strong>{risk.counts.High}</strong> High risk · <Link href="/risk">Risk</Link> · <Link href="/assets">Plant map</Link></p>
         </div>
         <div className="mod next">
           <div className="tag">DNF-2 · LINE HEALTH</div>
@@ -56,21 +56,21 @@ export default async function Dashboard() {
 
       <div className="grid g2" style={{ marginBottom: 14 }}>
         <div className="card">
-          <h2>Seals past planned life or rated poor</h2>
+          <h2>Seals to watch</h2>
           <div className="tw"><table>
-            <thead><tr><th>Position</th><th>Age against planned life</th><th>Last rating</th></tr></thead>
+            <thead><tr><th>Position</th><th>Score</th><th>Reaches High</th></tr></thead>
             <tbody>
-              {watch.length === 0 && <tr><td colSpan={3} className="muted">None right now.</td></tr>}
+              {watch.length === 0 && <tr><td colSpan={3} className="muted">None at Medium or High.</td></tr>}
               {watch.map((p) => (
-                <tr key={p.position_id}>
-                  <td><PosLink id={p.position_id}>{p.line_code} · {p.assembly} · {p.position_name}</PosLink></td>
-                  <td style={{ minWidth: 170 }}><Life age={p.age_days} nominal={p.nominal_life_days} /></td>
-                  <td>{p.last_rating ? <span className={`badge ${ratingClass(p.last_rating)}`}>{RATING[p.last_rating]}</span> : "–"}</td>
+                <tr key={p.positionId}>
+                  <td><PosLink id={p.positionId}>{p.lineCode} · {p.assembly} · {p.positionName}</PosLink></td>
+                  <td><span className={`badge ${p.result.level === "High" ? "b-red" : "b-amber"}`}>{p.result.level}</span> <strong>{p.result.score}</strong></td>
+                  <td>{p.projectedDays === 0 ? "now" : p.projectedHighOn ?? "not within a year"}</td>
                 </tr>
               ))}
             </tbody>
           </table></div>
-          <p className="small muted" style={{ marginBottom: 0 }}>A plain filter on the record, not a risk score. Phase 2 adds the explained score and the date each seal is likely to reach High.</p>
+          <p className="small" style={{ marginBottom: 0 }}><Link href="/risk">{risk.counts.High} High, {risk.counts.Medium} Medium · open risk and alerts</Link></p>
         </div>
         <div className="card">
           <h2>Next planned stops</h2>

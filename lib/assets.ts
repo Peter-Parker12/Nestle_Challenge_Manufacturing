@@ -76,20 +76,20 @@ export async function getPart(id: string) {
      left join cfg.app_user u on u.id=i.installed_by where i.part_id=$1 order by i.installed_on`, [id]);
   const ids = installs.map((i) => i.id);
   const inspections = ids.length ? await q(
-    `select r.id, r.installation_id, r.inspected_on, r.rating, r.finding, u.name as inspector from ast.inspection r left join cfg.app_user u on u.id=r.inspector_id
+    `select r.id, r.installation_id, r.inspected_on, r.rating, r.finding, r.ai_rating, r.override_reason, exists (select 1 from ast.inspection_photo ph where ph.inspection_id=r.id) as has_photo, u.name as inspector from ast.inspection r left join cfg.app_user u on u.id=r.inspector_id
      where r.installation_id = any($1::uuid[]) order by r.inspected_on`, [ids]) : [];
   const incidents = ids.length ? await q(
     `select n.id, n.installation_id, n.occurred_on, n.kind, n.severity, n.description from ast.incident n where n.installation_id = any($1::uuid[]) order by n.occurred_on`, [ids]) : [];
 
   // one chronological passport
-  type Ev = { date: string; kind: string; title: string; detail?: string; tone?: string; rating?: number };
+  type Ev = { photoId?: string; date: string; kind: string; title: string; detail?: string; tone?: string; rating?: number };
   const events: Ev[] = [];
   if (part.received_on) events.push({ date: part.received_on, kind: "received", title: "Received", detail: part.lot ? `Lot ${part.lot}` : undefined });
   for (const i of installs) {
     events.push({ date: i.installed_on, kind: "installed", title: `Installed at ${i.assembly}, ${i.position_name}`, detail: `${i.line_code} · ${i.equipment_name}${i.installed_by ? ` · by ${i.installed_by}` : ""}` });
     if (i.removed_on) events.push({ date: i.removed_on, kind: "removed", title: `Removed (${String(i.removal_reason).replace(/_/g, " ")})`, detail: i.note ?? undefined, tone: i.removal_reason === "failure" ? "bad" : undefined });
   }
-  for (const r of inspections) events.push({ date: r.inspected_on, kind: "inspection", title: `Inspected: ${RATING_LABEL[r.rating]}`, detail: [r.finding, r.inspector && `by ${r.inspector}`].filter(Boolean).join(" · ") || undefined, tone: r.rating >= 4 ? "bad" : r.rating === 3 ? "warn" : undefined, rating: r.rating });
+  for (const r of inspections) events.push({ date: r.inspected_on, kind: "inspection", title: `Inspected: ${RATING_LABEL[r.rating]}`, detail: [r.finding, r.ai_rating ? `photo assessment ${r.ai_rating}${r.override_reason ? `, lowered by the inspector: ${r.override_reason}` : ""}` : null, r.inspector && `by ${r.inspector}`].filter(Boolean).join(" · ") || undefined, photoId: r.has_photo ? r.id : undefined, tone: r.rating >= 4 ? "bad" : r.rating === 3 ? "warn" : undefined, rating: r.rating });
   for (const n of incidents) events.push({ date: n.occurred_on, kind: "incident", title: `${String(n.kind).replace(/_/g, " ")} (${n.severity})`, detail: n.description ?? undefined, tone: "bad" });
   const order: Record<string, number> = { received: 0, installed: 1, inspection: 2, incident: 3, removed: 4 };
   events.sort((a, b) => a.date.localeCompare(b.date) || order[a.kind] - order[b.kind]);
@@ -200,4 +200,27 @@ export async function createStop(userId: string, d: { lineId: string; startOn: s
 }
 export async function setStopStatus(userId: string, id: string, status: "Done" | "Cancelled") {
   return tx({ userId, reason: `Stop marked ${status}` }, async (c) => { await qc(c, `update ast.planned_stop set status=$2 where id=$1`, [id, status]); return { ok: true }; });
+}
+
+export type PhotoIn = { contentType: string; bytes: Buffer };
+export async function recordInspectionFull(userId: string, d: { positionId: string; inspectedOn: string; rating: number; finding?: string; analysisId?: string; overrideReason?: string; photo?: PhotoIn }) {
+  needDate(d.inspectedOn, "Inspection date");
+  const { createHash } = await import("node:crypto");
+  return tx({ userId, reason: "Inspection" }, async (c) => {
+    const open = (await qc(c, `select id from ast.installation where position_id=$1 and removed_on is null`, [d.positionId]))[0];
+    if (!open) throw new HttpError(409, "There is no seal installed at this position to inspect", "rule_violation");
+    let aiRating: number | null = null;
+    if (d.analysisId) {
+      if (!d.photo) throw new HttpError(422, "The photo assessment belongs to a photo. Attach the same photo", "validation");
+      const a = (await qc(c, `select rating, photo_sha, created_by from ast.photo_analysis where id=$1 and created_at > now() - interval '1 day'`, [d.analysisId]))[0];
+      if (!a) throw new HttpError(422, "That photo assessment was not found or has expired. Run it again", "validation");
+      if (a.created_by !== userId) throw new HttpError(403, "That assessment was made by someone else", "forbidden");
+      if (a.photo_sha !== createHash("sha256").update(d.photo.bytes).digest("hex")) throw new HttpError(422, "The photo is not the one that was assessed", "validation");
+      aiRating = a.rating;
+    }
+    const ins = (await qc(c, `insert into ast.inspection(installation_id,inspected_on,rating,finding,inspector_id,ai_analysis_id,ai_rating,override_reason) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
+      [open.id, d.inspectedOn, d.rating, d.finding?.trim() || null, userId, d.analysisId ?? null, aiRating, d.overrideReason?.trim() || null]))[0];
+    if (d.photo) await qc(c, `insert into ast.inspection_photo(inspection_id,content_type,data) values ($1,$2,$3)`, [ins.id, d.photo.contentType, d.photo.bytes]);
+    return { id: ins.id, aiRating };
+  });
 }

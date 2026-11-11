@@ -25,6 +25,8 @@ export const PERMISSIONS = {
   recordIncident: ["maintenance", "qa", "process_engineer", "plant_admin"],
   manageStops: ["plant_admin", "process_engineer", "maintenance"],
   importAssets: ["plant_admin", "maintenance"],
+  ackAlerts: ["maintenance", "process_engineer", "plant_admin", "qa"],
+  riskWeights: ["plant_admin", "process_engineer", "category_owner"],
   useAi: ["maintenance", "rd_engineer", "process_engineer", "qa", "category_owner", "supply_chain", "plant_admin", "viewer"],
 } satisfies Record<string, Role[]>;
 

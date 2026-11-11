@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import PositionActions from "@/components/PositionActions";
 import { Life, RATING, critClass, ratingClass, reasonLabel } from "@/components/assetUi";
 import { getPosition } from "@/lib/assets";
+import RiskPanel from "@/components/RiskPanel";
 import { getUser } from "@/lib/auth";
+import { positionRisk } from "@/lib/risk";
 import { q1 } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +15,7 @@ export default async function PositionPage({ params }: { params: Promise<{ id: s
   let d: Awaited<ReturnType<typeof getPosition>>;
   try { d = await getPosition(id); } catch { notFound(); }
   const user = await getUser();
+  const risk = await positionRisk(id);
   const { position: p, history, incidents, partTypes } = d;
   const seq = (await q1<{ n: number }>("select coalesce(max(substring(code from '[0-9]{1,9}$')::int),0)+1 as n from ast.part where code ~ '[0-9]+$'"))!.n;
   const closed = history.filter((h: any) => h.removed_on);
@@ -29,6 +32,8 @@ export default async function PositionPage({ params }: { params: Promise<{ id: s
         <div className="card kpi"><div className="l">Last inspection</div><div className="v" style={{ fontSize: 18 }}>{p.last_rating ? <span className={`badge ${ratingClass(p.last_rating)}`}>{RATING[p.last_rating]}</span> : "None"}</div><div className="d">{p.last_inspected_on ?? "not inspected yet"}</div></div>
         <div className="card kpi"><div className="l">Seals used here</div><div className="v">{history.length}</div><div className="d">{avgLife ? `average ${avgLife} days in service` : "no completed history"}</div></div>
       </div>
+
+      <RiskPanel risk={risk} />
 
       {p.position_status === "Active" && <PositionActions role={user.role} positionId={id} hasSeal={!!p.part_id} partTypes={partTypes} defaultTypeId={p.part_type_id ?? undefined} nextCode={`S-${p.part_type_code ?? "NEW"}-${seq}`} />}
 
