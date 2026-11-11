@@ -1,5 +1,5 @@
 /** Shared by server (enforcement) and browser (hiding buttons). The server always re-checks. */
-export type Role = "rd_engineer" | "process_engineer" | "qa" | "category_owner" | "supply_chain" | "plant_admin" | "viewer";
+export type Role = "rd_engineer" | "process_engineer" | "qa" | "category_owner" | "supply_chain" | "plant_admin" | "viewer" | "maintenance";
 
 export const PERMISSIONS = {
   createLaunch: ["rd_engineer", "process_engineer", "plant_admin"],
@@ -19,7 +19,13 @@ export const PERMISSIONS = {
   ruleDecision: ["category_owner"],
   importHistory: ["plant_admin", "category_owner", "process_engineer"],
   viewAudit: ["plant_admin", "category_owner", "qa"],
-  useAi: ["rd_engineer", "process_engineer", "qa", "category_owner", "supply_chain", "plant_admin", "viewer"],
+  manageAssets: ["plant_admin", "maintenance"],
+  recordSealWork: ["maintenance", "process_engineer", "plant_admin"],
+  recordInspection: ["maintenance", "qa", "process_engineer", "plant_admin"],
+  recordIncident: ["maintenance", "qa", "process_engineer", "plant_admin"],
+  manageStops: ["plant_admin", "process_engineer", "maintenance"],
+  importAssets: ["plant_admin", "maintenance"],
+  useAi: ["maintenance", "rd_engineer", "process_engineer", "qa", "category_owner", "supply_chain", "plant_admin", "viewer"],
 } satisfies Record<string, Role[]>;
 
 export type Action = keyof typeof PERMISSIONS;

@@ -4,8 +4,8 @@ import { getUser } from "@/lib/auth";
 import { listUsers } from "@/lib/repo";
 
 export const metadata = {
-  title: "Launch Accelerator | Workforce Solution",
-  description: "BAF-1 AI new product launch accelerator, a Workforce Solution demo for the Nestlé Vietnam AI Reinvention programme",
+  title: "Line Intelligence | Workforce Solution",
+  description: "One platform for launches, seals and line health (BAF-1, BAF-2, DNF-2). A Workforce Solution demo for the Nestlé Vietnam AI Reinvention programme",
 };
 export const dynamic = "force-dynamic";
 

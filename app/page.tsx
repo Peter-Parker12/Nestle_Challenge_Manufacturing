@@ -1,11 +1,18 @@
 import Link from "next/link";
 import { badge } from "@/components/api";
+import { Life, PosLink, RATING, ratingClass } from "@/components/assetUi";
+import { plantOverview } from "@/lib/assets";
 import { dashboardKpis, listLaunches } from "@/lib/repo";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
   const k = await dashboardKpis();
+  const plant = await plantOverview();
+  const pk = plant.kpis;
+  const watch = (plant.positions as any[])
+    .filter((p) => (p.age_days != null && p.age_days > p.nominal_life_days) || (p.last_rating ?? 0) >= 4)
+    .sort((a, b) => (b.age_days / b.nominal_life_days || 0) - (a.age_days / a.nominal_life_days || 0)).slice(0, 8);
   const launches = (await listLaunches()) as any[];
   const open = launches.filter((l) => !["Closed", "Cancelled"].includes(l.status));
   const base = k.groups.find((g: any) => g.used === false);
@@ -21,8 +28,65 @@ export default async function Dashboard() {
 
   return (
     <>
-      <h1>Launch Accelerator</h1>
+      <div className="eyebrow">Workforce Solution · Nestlé Vietnam AI Reinvention</div>
+      <h1>Line Intelligence</h1>
       <p className="sub">
+        One place for the plant&apos;s questions: what to start a new launch with, which seals and gaskets need attention, and what is wrong with the filler. The numbers come from code and history; Claude explains and answers with citations; people decide.
+      </p>
+
+      <div className="modgrid" style={{ marginBottom: 14 }}>
+        <div className="mod">
+          <div className="tag">BAF-1 · LAUNCH</div>
+          <h3>New product launch accelerator</h3>
+          <div className="small muted">Starting recipe and process window from similar past trials.</div>
+          <p style={{ margin: "10px 0 0" }}><strong>{open.length}</strong> open {open.length === 1 ? "launch" : "launches"} · <Link href="/launches">Launches</Link> · <Link href="/launches/new">New launch</Link></p>
+        </div>
+        <div className="mod">
+          <div className="tag">BAF-2 · SEALS AND GASKETS</div>
+          <h3>Foreign-body prevention</h3>
+          <div className="small muted">Every seal with its history, age and inspections. Risk scoring and alerts follow in phase 2.</div>
+          <p style={{ margin: "10px 0 0" }}><strong>{pk.positions}</strong> positions · <strong>{pk.beyond_nominal}</strong> past planned life · <Link href="/assets">Plant map</Link></p>
+        </div>
+        <div className="mod next">
+          <div className="tag">DNF-2 · LINE HEALTH</div>
+          <h3>&quot;Hey, Filler&quot; maintenance assistant</h3>
+          <div className="small muted">Prioritised filler health with evidence and step-by-step troubleshooting, linked to seal condition. Phase 3.</div>
+        </div>
+      </div>
+
+      <div className="grid g2" style={{ marginBottom: 14 }}>
+        <div className="card">
+          <h2>Seals past planned life or rated poor</h2>
+          <div className="tw"><table>
+            <thead><tr><th>Position</th><th>Age against planned life</th><th>Last rating</th></tr></thead>
+            <tbody>
+              {watch.length === 0 && <tr><td colSpan={3} className="muted">None right now.</td></tr>}
+              {watch.map((p) => (
+                <tr key={p.position_id}>
+                  <td><PosLink id={p.position_id}>{p.line_code} · {p.assembly} · {p.position_name}</PosLink></td>
+                  <td style={{ minWidth: 170 }}><Life age={p.age_days} nominal={p.nominal_life_days} /></td>
+                  <td>{p.last_rating ? <span className={`badge ${ratingClass(p.last_rating)}`}>{RATING[p.last_rating]}</span> : "–"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+          <p className="small muted" style={{ marginBottom: 0 }}>A plain filter on the record, not a risk score. Phase 2 adds the explained score and the date each seal is likely to reach High.</p>
+        </div>
+        <div className="card">
+          <h2>Next planned stops</h2>
+          <div className="tw"><table>
+            <thead><tr><th>Line</th><th>From</th><th>To</th><th>Kind</th></tr></thead>
+            <tbody>
+              {plant.stops.length === 0 && <tr><td colSpan={4} className="muted">No stops planned.</td></tr>}
+              {plant.stops.map((s: any) => <tr key={s.id}><td>{s.line_code}</td><td>{s.start_on}</td><td>{s.end_on}</td><td>{s.kind}</td></tr>)}
+            </tbody>
+          </table></div>
+          <p className="small" style={{ marginBottom: 0 }}><Link href="/assets/stops">Open the calendar</Link></p>
+        </div>
+      </div>
+
+      <h2 style={{ marginTop: 22 }}>Launch performance · BAF-1</h2>
+      <p className="sub" style={{ marginBottom: 12 }}>
         Recommends a starting recipe and process window for each new product launch, from similar past trials, and flags the risks. Engineers review and approve every plan.
       </p>
 

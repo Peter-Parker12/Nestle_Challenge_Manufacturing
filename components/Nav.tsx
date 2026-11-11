@@ -6,17 +6,33 @@ import { api } from "./api";
 
 type U = { id: string; name: string; role: string };
 
-const links = [
-  { href: "/", label: "Dashboard", sub: "KPIs and open launches" },
-  { href: "/launches", label: "Launches", sub: "All product launches" },
-  { href: "/launches/new", label: "New launch", sub: "Start a trial plan" },
-  { href: "/import", label: "Import history", sub: "Upload previous runs" },
-  { href: "/ask", label: "Ask the history", sub: "Questions with citations" },
-  { href: "/config", label: "Configuration", sub: "Weights and expert rules" },
-  { href: "/config/fields", label: "Product fields", sub: "Custom fields per category" },
-  { href: "/config/process", label: "Process setup", sub: "Parameters, tests, line limits" },
-  { href: "/audit", label: "Audit log", sub: "Every change, who and why" },
+type Item = { href: string; label: string };
+const groups: { title: string; tag?: string; items: Item[]; soon?: { label: string; phase: string }[] }[] = [
+  { title: "Plant", items: [{ href: "/", label: "Overview" }] },
+  {
+    title: "Launch", tag: "BAF-1",
+    items: [{ href: "/launches", label: "Launches" }, { href: "/launches/new", label: "New launch" }, { href: "/ask", label: "Ask the history" }],
+  },
+  {
+    title: "Seals & gaskets", tag: "BAF-2",
+    items: [{ href: "/assets", label: "Plant map" }, { href: "/assets/parts", label: "Seal register" }, { href: "/assets/stops", label: "Planned stops" }],
+    soon: [{ label: "Risk and alerts", phase: "phase 2" }],
+  },
+  { title: "Line health", tag: "DNF-2", items: [], soon: [{ label: "Filler health", phase: "phase 3" }, { label: "Hey, Filler", phase: "phase 3" }] },
+  {
+    title: "Setup",
+    items: [
+      { href: "/assets/setup", label: "Plant setup" },
+      { href: "/config/fields", label: "Product fields" },
+      { href: "/config/process", label: "Process setup" },
+      { href: "/config", label: "Weights and rules" },
+      { href: "/import", label: "Import launch history" },
+      { href: "/assets/import", label: "Import seal history" },
+      { href: "/audit", label: "Audit log" },
+    ],
+  },
 ];
+const links = groups.flatMap((g) => g.items);
 
 export default function Nav({ user, users, switcher }: { user: U; users: U[]; switcher: boolean }) {
   const path = usePathname();
@@ -34,14 +50,19 @@ export default function Nav({ user, users, switcher }: { user: U; users: U[]; sw
     <aside className="side">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img className="logo" src="/brand/logo-white.png" alt="Workforce Solution" width={148} height={62} />
-      <div className="brand">Launch Accelerator</div>
-      <div className="brand-sub">BAF-1 · prepared for the Nestlé Vietnam AI Reinvention programme</div>
+      <div className="brand">Line Intelligence</div>
+      <div className="brand-sub">One platform for launches, seals and line health · Nestlé Vietnam AI Reinvention</div>
       <nav className="nav" aria-label="Main">
-        {links.map((l) => (
-          <Link key={l.href} href={l.href} className={active(l.href) ? "on" : ""}>
-            {l.label}
-            <small>{l.sub}</small>
-          </Link>
+        {groups.map((g) => (
+          <div key={g.title} className="ng">
+            <div className="nh">{g.title}{g.tag && <span>{g.tag}</span>}</div>
+            {g.items.map((l) => (
+              <Link key={l.href} href={l.href} className={active(l.href) ? "on" : ""} aria-current={active(l.href) ? "page" : undefined}>{l.label}</Link>
+            ))}
+            {g.soon?.map((l) => (
+              <span key={l.label} className="soon">{l.label}<em>{l.phase}</em></span>
+            ))}
+          </div>
         ))}
       </nav>
       <div className="who">

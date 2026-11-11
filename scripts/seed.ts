@@ -2,6 +2,7 @@
 import { Client } from "pg";
 import { deriveRunResult } from "../lib/engine/outcome";
 import { gauss, rng } from "../lib/rng";
+import { seedAssets } from "./seedAssets";
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error("DATABASE_URL is not set");
@@ -28,7 +29,7 @@ async function main() {
       console.error("[seed] database is not empty. Use --force to wipe and reseed.");
       process.exit(1);
     }
-    await c.query(`truncate cfg.app_user, cfg.category, cfg.reason_code, cfg.line, ai.document, ai.call_log, audit.event, stg.load restart identity cascade`);
+    await c.query(`truncate cfg.app_user, cfg.category, cfg.reason_code, cfg.line, ast.part_type, ast.part, ai.document, ai.call_log, audit.event, stg.load restart identity cascade`);
     await c.query("alter sequence core.launch_code_seq restart with 1000");
   }
   await c.query("begin");
@@ -57,6 +58,7 @@ async function seed(c: Client) {
     ["Bao Vo (Supply Chain)", "bao.sc@demo.local", "supply_chain"],
     ["Chi Dang (Plant admin)", "chi.admin@demo.local", "plant_admin"],
     ["Dung Hoang (Viewer)", "dung.view@demo.local", "viewer"],
+    ["Tuan Bui (Maintenance)", "tuan.maint@demo.local", "maintenance"],
   ]) users[role] = (await ins("insert into cfg.app_user(name,email,role) values ($1,$2,$3) returning id", [name, email, role])).id;
 
   // ---- reason codes
@@ -219,7 +221,8 @@ async function seed(c: Client) {
   await c.query("insert into core.launch_project(product_id,line_id,objective,status,created_by) values ($1,$2,'Demo launch: new choco malt RTD','Draft',$3)", [dp, lines[2].id, users.rd_engineer]);
 
   }
-  console.log(DEMO ? `[seed] ${launchCount} accepted launches, 1 open demo launch` : "[seed] reference configuration only (no launches)");
+  const a = await seedAssets(c, { lines, users, history: DEMO });
+  console.log(DEMO ? `[seed] ${a.positions} seal positions, ${a.parts} seals; ${launchCount} accepted launches, 1 open demo launch` : "[seed] reference configuration only (no launches)");
 }
 
 main().catch((e) => {
