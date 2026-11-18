@@ -1,233 +1,216 @@
-/* Synthetic demo data. Nothing here is Nestle data. */
+/**
+ * Synthetic, real-shaped market data for the demo. Deterministic. Everything is generated and labelled as sample data.
+ *   npx tsx scripts/seed.ts --force        wipe and reseed
+ *   npx tsx scripts/seed.ts --if-empty     seed only when the database has no users
+ *   add --config-only for users, channels and settings without any prices
+ * Planted events (relative to the newest date, D): a competitor price cut at modern trade (D-3), a promo wave on eCom (D-2),
+ * a pack-size change (D-5), out-of-stock slots (D-4), a competitor price rise on eCom (D-2), and a widening shelf gap in general trade.
+ */
 import { Client } from "pg";
-import { deriveRunResult } from "../lib/engine/outcome";
 import { gauss, rng } from "../lib/rng";
-import { seedAssets } from "./seedAssets";
-import { seedLineHealth } from "./seedLineHealth";
+import { renderShelf, type ShelfSpec } from "../lib/mockShelf";
+import { createPhoto, checkItem, refreshRadar } from "../lib/radar";
+import { q, q1, tx, qc } from "../lib/db";
+import { createHash } from "node:crypto";
 
-const url = process.env.DATABASE_URL;
-if (!url) throw new Error("DATABASE_URL is not set");
 const args = process.argv.slice(2);
-const IF_EMPTY = args.includes("--if-empty");
-const FORCE = args.includes("--force");
-const DEMO = !args.includes("--config-only"); // config-only = users, lines, parameters, rules, no launches
+const FORCE = args.includes("--force"), IF_EMPTY = args.includes("--if-empty"), CONFIG_ONLY = args.includes("--config-only");
+const day = (d: Date) => d.toISOString().slice(0, 10);
+const add = (d: string, n: number) => day(new Date(Date.parse(d + "T00:00:00Z") + n * 86400000));
 
-const r = rng(20261108);
-const pick = <T,>(a: T[]) => a[Math.floor(r() * a.length)];
-const rnd = (lo: number, hi: number) => lo + r() * (hi - lo);
-const round = (n: number, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
+const USERS = [
+  ["Linh Tran (Sales lead)", "linh.tran@example.com", "sales_lead"], ["Minh Pham (Category manager)", "minh.pham@example.com", "category_manager"],
+  ["An Nguyen (Field rep)", "an.nguyen@example.com", "field_rep"], ["Hoa Le (Analyst)", "hoa.le@example.com", "analyst"],
+  ["Quang Vo (Admin)", "quang.vo@example.com", "admin"], ["Guest (read only)", "guest@example.com", "viewer"],
+];
+const SETTINGS: [string, number, number, number, string, string, string][] = [
+  ["z_threshold", 3, 2, 6, "x", "Unusualness needed to flag a price change", "How many robust standard deviations from a retailer's own history. Higher flags fewer moves."],
+  ["min_change_pct", 3, 1, 20, "%", "Smallest price change worth flagging", "Changes smaller than this are ignored even if unusual."],
+  ["promo_depth_pct", 12, 5, 40, "%", "Promo depth that counts as a promo wave", "Discount a shopper gets after promo or voucher, against the shelf price."],
+  ["shelf_gap_pct", 8, 3, 25, "%", "Shelf price gap that counts as a gap", "Our price above the competing product on the shelf."],
+  ["oos_min_retailers", 3, 2, 10, "retailers", "Empty slots that count as an out-of-stock move", "Retailers showing our SKU out of stock in the last week."],
+  ["diversion_rate", 0.3, 0.05, 0.8, "share", "Share of a price gap that moves demand", "Assumption. Ask category management to confirm for each category."],
+  ["gross_margin", 0.32, 0.1, 0.6, "share", "Gross margin on Nestlé sales", "Used for the margin figure in scenarios. A placeholder until Finance confirms."],
+  ["promo_depth_scenario_pct", 5, 2, 15, "%", "Depth of the targeted promo scenario", "Applied for two weeks in the retailers affected."],
+  ["shelf_uplift_pct", 3, 1, 10, "%", "Volume uplift from a shelf action", "An assumption: there is little history for display actions."],
+  ["default_elasticity", -1.4, -3, -0.5, "elasticity", "Price elasticity used when the data cannot give one", "Used when a SKU has too little price variation."],
+  ["oos_loss_rate", 0.3, 0.1, 1, "share", "Share of demand lost while a slot is empty", "Assumption for the out-of-stock exposure."],
+  ["level_high_vnd", 120000000, 10000000, 2000000000, "VND/week", "Exposure that makes a move High", "Weekly Nestlé revenue at risk."],
+  ["level_medium_vnd", 40000000, 1000000, 1000000000, "VND/week", "Exposure that makes a move Medium", "Weekly Nestlé revenue at risk."],
+];
+// code, name, brand, nestle, category, pack_ml, pack_count, competes_with, base price, weekly revenue at MT (VND), true elasticity
+const SKUS: [string, string, string, boolean, string, number, number, string | null, number, number, number][] = [
+  ["N-UHT-1L", "UHT full cream milk 1 L", "Nestlé", true, "UHT milk", 1000, 1, null, 25400, 3_800_000_000, -1.6],
+  ["N-UHT-180", "UHT milk 180 ml", "Nestlé", true, "UHT milk", 180, 1, null, 7800, 2_200_000_000, -1.3],
+  ["N-RTD-180", "RTD chocolate milk 180 ml", "Nestlé", true, "RTD milk", 180, 1, null, 11500, 1_600_000_000, -2.0],
+  ["N-YOG-4", "Drinking yoghurt 4-pack", "Nestlé", true, "Drinking yoghurt", 400, 4, null, 28000, 1_000_000_000, -1.8],
+  ["A-UHT-1L", "UHT milk 1 L", "Competitor A", false, "UHT milk", 1000, 1, "N-UHT-1L", 24600, 0, 0],
+  ["C-UHT-1L", "UHT milk 1 L", "Competitor C", false, "UHT milk", 1000, 1, "N-UHT-1L", 25000, 0, 0],
+  ["A-UHT-180", "UHT milk 180 ml", "Competitor A", false, "UHT milk", 180, 1, "N-UHT-180", 7500, 0, 0],
+  ["C-RTD-180", "RTD chocolate milk 180 ml", "Competitor C", false, "RTD milk", 180, 1, "N-RTD-180", 10900, 0, 0],
+  ["B-YOG-4", "Drinking yoghurt 4-pack", "Competitor B", false, "Drinking yoghurt", 400, 4, "N-YOG-4", 26500, 0, 0],
+];
+const CHANNELS = [["GT", "General trade"], ["MT", "Modern trade"], ["ECOM", "eCom"]];
+const RETAILERS: [string, string, string][] = [
+  ...[1, 2, 3, 4].map((i) => [`MT-${i}`, `Modern trade chain ${i}`, "MT"] as [string, string, string]),
+  ...[1, 2, 3].map((i) => [`EC-${i}`, `Marketplace ${i}`, "ECOM"] as [string, string, string]),
+  ...[1, 2, 3, 4, 5, 6].map((i) => [`GT-${i}`, `Store ${i}`, "GT"] as [string, string, string]),
+];
+const CH_OFF: Record<string, number> = { GT: 1.02, MT: 1.0, ECOM: 0.97 };
+const CH_REV: Record<string, number> = { GT: 0.7, MT: 1.0, ECOM: 0.25 };
+
+async function bulk(client: Client, table: string, cols: [string, string][], rows: any[][]) {
+  const spec = cols.map(([n, t]) => `${n} ${t}`).join(", ");
+  for (let i = 0; i < rows.length; i += 1500) {
+    const chunk = rows.slice(i, i + 1500).map((r) => Object.fromEntries(cols.map(([n], k) => [n, r[k]])));
+    await client.query(`insert into ${table}(${cols.map((c) => c[0]).join(",")}) select * from jsonb_to_recordset($1::jsonb) as t(${spec})`, [JSON.stringify(chunk)]);
+  }
+}
 
 async function main() {
-  const c = new Client({ connectionString: url });
-  await c.connect();
-  const existing = await c.query("select count(*)::int as n from cfg.category");
-  if (existing.rows[0].n > 0) {
-    if (IF_EMPTY) {
-      console.log("[seed] database already has data, skipping");
-      return c.end();
-    }
-    if (!FORCE) {
-      console.error("[seed] database is not empty. Use --force to wipe and reseed.");
-      process.exit(1);
-    }
-    await c.query(`truncate cfg.app_user, cfg.category, cfg.reason_code, cfg.line, ast.part_type, ast.part, ops.guide, ai.document, ai.call_log, audit.event, stg.load restart identity cascade`);
-    await c.query("alter sequence core.launch_code_seq restart with 1000");
-  }
-  await c.query("begin");
-  await c.query("select set_config('app.reason', 'seed', true)");
-  try {
-    await seed(c);
-    await c.query("commit");
-    console.log("[seed] done");
-  } catch (e) {
-    await c.query("rollback");
-    throw e;
-  }
-  await c.end();
-}
+  const url = process.env.DATABASE_URL; if (!url) throw new Error("DATABASE_URL is not set");
+  const c = new Client({ connectionString: url }); await c.connect();
+  if (IF_EMPTY && Number((await c.query("select count(*) from cfg.app_user")).rows[0].count) > 0) { console.log("[seed] database already has data, skipping"); await c.end(); return; }
+  if (!FORCE && !IF_EMPTY && Number((await c.query("select count(*) from cfg.app_user")).rows[0].count) > 0) throw new Error("Database is not empty. Use --force to wipe and reseed");
+  await c.query(`truncate audit.event, ai.call_log, mkt.decision, mkt.scenario, mkt.move, mkt.elasticity, mkt.photo_item, mkt.photo, mkt.brief, mkt.truth_event, mkt.observation, mkt.sales_weekly, mkt.feed_status, mkt.retailer, mkt.sku, cfg.setting, cfg.channel, cfg.app_user restart identity cascade`);
+  await c.query(`alter sequence mkt.move_seq restart with 2001`);
 
-async function seed(c: Client) {
-  const ins = async (sql: string, p: unknown[] = []) => (await c.query(sql, p)).rows[0];
+  for (const [name, email, role] of USERS) await c.query(`insert into cfg.app_user(name,email,role) values ($1,$2,$3)`, [name, email, role]);
+  for (const [k, v, lo, hi, unit, label, help] of SETTINGS) await c.query(`insert into cfg.setting(key,value,min_value,max_value,unit,label,help) values ($1,$2,$3,$4,$5,$6,$7)`, [k, v, lo, hi, unit, label, help]);
+  for (const [code, name] of CHANNELS) await c.query(`insert into cfg.channel(code,name) values ($1,$2)`, [code, name]);
+  const chId = Object.fromEntries((await c.query(`select id, code from cfg.channel`)).rows.map((r) => [r.code, r.id]));
+  for (const [code, name, ch] of RETAILERS) await c.query(`insert into mkt.retailer(code,name,channel_id) values ($1,$2,$3)`, [code, name, chId[ch]]);
+  const retId = Object.fromEntries((await c.query(`select id, code from mkt.retailer`)).rows.map((r) => [r.code, r.id]));
+  for (const s of SKUS.filter((x) => x[3])) await c.query(`insert into mkt.sku(code,name,brand,is_nestle,category,pack_ml,pack_count) values ($1,$2,$3,$4,$5,$6,$7)`, [s[0], s[1], s[2], s[3], s[4], s[5], s[6]]);
+  const nid = Object.fromEntries((await c.query(`select id, code from mkt.sku`)).rows.map((r) => [r.code, r.id]));
+  for (const s of SKUS.filter((x) => !x[3])) await c.query(`insert into mkt.sku(code,name,brand,is_nestle,category,pack_ml,pack_count,competes_with) values ($1,$2,$3,$4,$5,$6,$7,$8)`, [s[0], s[1], s[2], s[3], s[4], s[5], s[6], nid[s[7]!]]);
+  const sid = Object.fromEntries((await c.query(`select id, code from mkt.sku`)).rows.map((r) => [r.code, r.id]));
+  if (CONFIG_ONLY) { console.log("[seed] config only: done"); await c.end(); return; }
 
-  // ---- users
-  const users: Record<string, string> = {};
-  for (const [name, email, role] of [
-    ["Linh Tran (R&D)", "linh.rd@demo.local", "rd_engineer"],
-    ["Minh Nguyen (Process)", "minh.process@demo.local", "process_engineer"],
-    ["Hoa Pham (QA)", "hoa.qa@demo.local", "qa"],
-    ["An Le (Category owner)", "an.owner@demo.local", "category_owner"],
-    ["Bao Vo (Supply Chain)", "bao.sc@demo.local", "supply_chain"],
-    ["Chi Dang (Plant admin)", "chi.admin@demo.local", "plant_admin"],
-    ["Dung Hoang (Viewer)", "dung.view@demo.local", "viewer"],
-    ["Tuan Bui (Maintenance)", "tuan.maint@demo.local", "maintenance"],
-  ]) users[role] = (await ins("insert into cfg.app_user(name,email,role) values ($1,$2,$3) returning id", [name, email, role])).id;
+  // ---------------------------------------------------------------- dates
+  const D = day(new Date());
+  const dow = new Date(D + "T00:00:00Z").getUTCDay();
+  const lastMonday = add(D, -((dow + 6) % 7));
+  const R = rng(20261118);
+  const obsRows: any[][] = [];
+  const nestlePriceByChWk = new Map<string, number[]>(); // key sku|ch|week -> prices seen
 
-  // ---- reason codes
-  for (const [code, label] of [
-    ["viscosity_off", "Viscosity out of target"], ["sedimentation", "Sedimentation"], ["creaming", "Creaming / fat separation"],
-    ["ph_off", "pH out of range"], ["sterility_concern", "Sterility concern"], ["filling_issue", "Filling issue"],
-    ["equipment_issue", "Equipment issue"], ["material_issue", "Raw or packaging material issue"], ["other", "Other"],
-  ]) await c.query("insert into cfg.reason_code(code,label) values ($1,$2)", [code, label]);
-
-  // ---- lines
-  const lines: { id: string; code: string }[] = [];
-  for (const [code, name] of [["L1", "UHT Line 1"], ["L2", "UHT Line 2"], ["L3", "UHT Line 3"]])
-    lines.push({ code, id: (await ins("insert into cfg.line(code,name,plant) values ($1,$2,'Demo Plant') returning id", [code, name])).id });
-
-  // ---- category 1: UHT drinks (populated)
-  const cat = (await ins("insert into cfg.category(code,name,owner_user_id) values ('UHT_DRINK','UHT drinks (RTD)',$1) returning id", [users.category_owner])).id;
-  const steps: Record<string, string> = {};
-  for (const [i, name] of ["Homogenisation", "UHT treatment", "Filling"].entries())
-    steps[name] = (await ins("insert into cfg.process_step(category_id,name,seq) values ($1,$2,$3) returning id", [cat, name, i + 1])).id;
-
-  const P: Record<string, { id: string; min: number; max: number; ideal: (a: A) => number; sd: number; capMin: number; capMax: number }> = {};
-  type A = { viscosity_cp: number; fat_pct: number; solids_pct: number };
-  const pdefs: [string, string, string, string, number, number, boolean, boolean, (a: A) => number, number, number, number][] = [
-    // step, code, name, unit, absMin, absMax, critical, locked, ideal, sd, capMin, capMax
-    ["Homogenisation", "homog_pressure_bar", "Homogenisation pressure", "bar", 100, 320, true, false, (a) => 120 + a.viscosity_cp * 2.2 + a.solids_pct * 1.5, 22, 130, 300],
-    ["UHT treatment", "uht_temp_c", "UHT holding temperature", "°C", 134, 146, true, true, (a) => 139 + a.fat_pct * 0.6, 1.4, 136, 144],
-    ["UHT treatment", "hold_time_s", "Holding time", "s", 2, 8, false, false, (a) => 4 + a.solids_pct * 0.05, 0.4, 3, 7],
-    ["Filling", "fill_temp_c", "Filling temperature", "°C", 10, 35, false, false, () => 22, 3, 14, 30],
-    ["Filling", "flow_rate_lph", "Flow rate", "L/h", 3000, 7000, false, false, (a) => 5200 - a.viscosity_cp * 15, 150, 3500, 6500],
+  // channel-wide Nestlé promo weeks (these give the elasticity estimate something to learn from)
+  const promoWeek = new Map<string, number>();
+  for (const s of SKUS.filter((x) => x[3])) for (const ch of Object.keys(CH_OFF)) for (let k = 1; k <= 52; k++) if (R() < 0.16) promoWeek.set(`${s[0]}|${ch}|${k}`, 0.07 + R() * 0.07);
+  // historical competitor events (also the ground truth for the backtest)
+  const hist = [
+    { kind: "price_cut", sku: "A-UHT-1L", ch: "MT", start: add(lastMonday, -7 * 17), weeks: 3, factor: 0.92, note: "Competitor A price cut, 3 weeks" },
+    { kind: "promo", sku: "B-YOG-4", ch: "ECOM", start: add(lastMonday, -7 * 30), weeks: 2, factor: 0.85, note: "Competitor B promo, 2 weeks" },
   ];
-  for (const [step, code, name, unit, mn, mx, crit, locked, ideal, sd, cmin, cmax] of pdefs) {
-    const id = (await ins("insert into cfg.parameter_def(step_id,code,name,unit,abs_min,abs_max,is_critical,is_locked) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id", [steps[step], code, name, unit, mn, mx, crit, locked])).id;
-    P[code] = { id, min: mn, max: mx, ideal, sd, capMin: cmin, capMax: cmax };
-    for (const l of lines) await c.query("insert into cfg.line_capability values ($1,$2,$3,$4)", [l.id, id, cmin, cmax]);
+  const inHist = (skuCode: string, ch: string, date: string) => hist.find((h) => h.sku === skuCode && h.ch === ch && date >= h.start && date < add(h.start, h.weeks * 7));
+
+  const mk = (skuCode: string, retCode: string, ch: string, date: string, weekAgo: number, source: string) => {
+    const s = SKUS.find((x) => x[0] === skuCode)!;
+    const retOff = 1 + (((retCode.charCodeAt(retCode.length - 1) * 7919) % 31) - 15) / 1000; // +-1.5 %
+    const season = 1 + 0.004 * Math.sin((2 * Math.PI * weekAgo) / 52);
+    let price = s[8] * CH_OFF[ch] * retOff * season * (1 + 0.003 * gauss(R));
+    let promoPrice: number | null = null, promoText: string | null = null, packMl: number | null = s[5], inStock = true, facings: number | null = 2 + Math.floor(R() * 3);
+    if (s[3]) { const pw = promoWeek.get(`${skuCode}|${ch}|${weekAgo}`); if (pw) price *= 1 - pw; }
+    else if (R() < 0.03 && weekAgo > 0) price *= 0.93;
+    const h = inHist(skuCode, ch, date);
+    if (h) { if (h.kind === "price_cut") price *= h.factor; else if (!retCode.endsWith("3")) { promoPrice = Math.round(price * h.factor); promoText = "promo"; } }
+    // ---- planted, current events (daily rows in the last week)
+    const ago = Math.round((Date.parse(D) - Date.parse(date)) / 86400000);
+    if (skuCode === "A-UHT-1L" && ch === "MT" && ago <= 3 && !retCode.endsWith("4")) price *= 0.89;
+    if (skuCode === "B-YOG-4" && ch === "ECOM" && ago <= 2) { if (retCode !== "EC-3") { promoPrice = Math.round(price * 0.82); promoText = "4-pack + voucher"; } else { promoPrice = Math.round(price * 0.96); promoText = "voucher"; } }
+    if (skuCode === "A-UHT-180" && ch === "MT" && ago <= 5) packMl = 170;
+    if (skuCode === "C-UHT-1L" && ch === "ECOM" && ago <= 2) price *= 1.06;
+    if (skuCode === "N-YOG-4" && ch === "MT" && ago <= 4 && ["MT-1", "MT-2", "MT-3"].includes(retCode)) { inStock = false; facings = 0; }
+    if (skuCode === "C-RTD-180" && ch === "GT" && date >= add(lastMonday, -14)) price = (s[8] - 400) * CH_OFF[ch] * retOff * season * (1 + 0.003 * gauss(R));
+    price = Math.round(price / 100) * 100;
+    if (promoPrice != null) promoPrice = Math.min(promoPrice, price);
+    if (s[3]) { const k = `${skuCode}|${ch}|${weekAgo}`; (nestlePriceByChWk.get(k) ?? nestlePriceByChWk.set(k, []).get(k)!).push(promoPrice ?? price); }
+    obsRows.push([sid[skuCode], retId[retCode], chId[ch], date, price, promoPrice, promoText, packMl, inStock, facings, source, null]);
+  };
+
+  const retsOf = (ch: string) => RETAILERS.filter((r) => r[2] === ch).map((r) => r[0]);
+  for (const s of SKUS) for (const [rc, , ch] of RETAILERS) {
+    const source = ch === "MT" ? "price_list" : "feed";
+    for (let k = 1; k <= 52; k++) mk(s[0], rc, ch, add(lastMonday, -7 * k), k, source);
+    if (ch === "GT") mk(s[0], rc, ch, lastMonday, 0, "feed");
+    else for (let a = 6; a >= 0; a--) { const date = add(D, -a); mk(s[0], rc, ch, date, 0, source); }
   }
+  void retsOf;
+  const cols: [string, string][] = [["sku_id", "uuid"], ["retailer_id", "uuid"], ["channel_id", "uuid"], ["observed_on", "date"], ["price", "numeric"], ["promo_price", "numeric"], ["promo_text", "text"], ["pack_ml", "int"], ["in_stock", "boolean"], ["facings", "int"], ["source", "text"], ["source_ref", "text"]];
+  // a retailer's weekly row for the current week would collide with its daily row: keep one per sku, retailer, date, source
+  const seen = new Set<string>(); const uniq = obsRows.filter((r) => { const k = `${r[0]}|${r[1]}|${r[3]}|${r[10]}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  await bulk(c, "mkt.observation", cols, uniq);
 
-  const AT: Record<string, string> = {};
-  for (const [code, name, unit, type, choices, req, mn, mx] of [
-    ["viscosity_cp", "Target viscosity", "cP", "numeric", null, true, 5, 60],
-    ["fat_pct", "Fat", "%", "numeric", null, true, 0, 5],
-    ["solids_pct", "Total solids", "%", "numeric", null, true, 5, 25],
-    ["ph", "pH", null, "numeric", null, false, 6.0, 7.2],
-    ["pack_ml", "Pack size", "ml", "numeric", null, false, 100, 1000],
-    ["base", "Base", null, "choice", JSON.stringify(["milk", "plant", "coffee", "cocoa", "cereal"]), true, null, null],
-  ] as const)
-    AT[code] = (await ins("insert into cfg.attribute_def(category_id,code,name,unit,data_type,choices,required,abs_min,abs_max) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id", [cat, code, name, unit, type, choices, req, mn, mx])).id;
+  // ---------------------------------------------------------------- Nestlé sales, weekly, up to the last full week
+  const salesRows: any[][] = [];
+  for (const s of SKUS.filter((x) => x[3])) for (const ch of Object.keys(CH_OFF)) for (let k = 52; k >= 1; k--) {
+    const ps = nestlePriceByChWk.get(`${s[0]}|${ch}|${k}`); if (!ps?.length) continue;
+    const p = ps.reduce((a, b) => a + b, 0) / ps.length;
+    const base = s[8] * CH_OFF[ch];
+    const eps = s[10] * (ch === "ECOM" ? 1.2 : 1);
+    const baseUnits = (s[9] * CH_REV[ch]) / base;
+    let units = baseUnits * Math.pow(p / base, eps) * (1 + 0.08 * Math.sin((2 * Math.PI * k) / 52)) * (1 + 0.03 * gauss(R));
+    const h = hist.find((x) => x.sku === (s[0] === "N-UHT-1L" ? "A-UHT-1L" : "") && x.ch === ch && add(lastMonday, -7 * k) >= x.start && add(lastMonday, -7 * k) < add(x.start, x.weeks * 7));
+    if (h) units *= 1 - 0.3 * Math.abs(eps) * 0.08;
+    units = Math.max(1, Math.round(units));
+    salesRows.push([sid[s[0]], chId[ch], add(lastMonday, -7 * k), units, Math.round(units * p)]);
+  }
+  await bulk(c, "mkt.sales_weekly", [["sku_id", "uuid"], ["channel_id", "uuid"], ["week_start", "date"], ["units", "numeric"], ["revenue_vnd", "numeric"]], salesRows);
 
-  const QT: Record<string, { id: string; crit: boolean }> = {};
-  for (const [code, name, unit, crit] of [
-    ["viscosity_cp", "Viscosity", "cP", true], ["sediment_pct", "Sediment", "%", true],
-    ["creaming_idx", "Creaming index", null, true], ["ph", "pH", null, false],
-  ] as const)
-    QT[code] = { crit, id: (await ins("insert into cfg.quality_test_def(category_id,code,name,unit,is_critical) values ($1,$2,$3,$4,$5) returning id", [cat, code, name, unit, crit])).id };
+  // ---------------------------------------------------------------- ground truth for the backtest (synthetic only)
+  const truth = [
+    ...hist.map((h) => [h.kind, h.sku, h.ch, h.start, h.note]),
+    ["price_cut", "A-UHT-1L", "MT", add(D, -3), "Planted: Competitor A price cut at 3 of 4 chains"],
+    ["promo", "B-YOG-4", "ECOM", add(D, -2), "Planted: promo and voucher wave on 2 marketplaces"],
+    ["pack_change", "A-UHT-180", "MT", add(D, -5), "Planted: pack 180 ml to 170 ml, same price"],
+    ["out_of_stock", "N-YOG-4", "MT", add(D, -4), "Planted: empty slots at 3 chains"],
+    ["price_rise", "C-UHT-1L", "ECOM", add(D, -2), "Planted: Competitor C price rise"],
+    ["price_cut", "C-RTD-180", "GT", add(lastMonday, -14), "Planted: Competitor C cut in general trade, widening our shelf gap"],
+  ];
+  for (const t of truth) await c.query(`insert into mkt.truth_event(kind,sku_id,channel_id,started_on,note) values ($1,$2,$3,$4,$5)`, [t[0], sid[t[1]], chId[t[2]], t[3], t[4]]);
 
-  // ---- category 2: sauces (configured only, no trials: shows the multi-category structure)
-  const cat2 = (await ins("insert into cfg.category(code,name,owner_user_id) values ('SAUCE','Sauces (configured, no history yet)',$1) returning id", [users.category_owner])).id;
-  const s2 = (await ins("insert into cfg.process_step(category_id,name,seq) values ($1,'Cooking',1) returning id", [cat2])).id;
-  await c.query("insert into cfg.parameter_def(step_id,code,name,unit,abs_min,abs_max,is_critical) values ($1,'cook_temp_c','Cooking temperature','°C',60,110,true), ($1,'cook_time_min','Cooking time','min',5,60,false)", [s2]);
-  await c.query(`insert into cfg.attribute_def(category_id,code,name,unit,data_type,required,abs_min,abs_max) values
-    ($1,'salt_pct','Salt','%','numeric',true,5,25), ($1,'ph','pH',null,'numeric',true,3,6), ($1,'viscosity_cp','Viscosity','cP','numeric',false,50,5000)`, [cat2]);
+  const nObs = (await c.query(`select count(*) from mkt.observation`)).rows[0].count;
+  await c.query(`insert into mkt.feed_status(name,kind,last_run,rows_added,note) values
+    ('eCom prices and promos','feed',now(),$1,'Synthetic collector'),('Modern trade price lists','price_list',now(),$1,'Synthetic collector'),
+    ('General trade shelf audit','feed',now() - interval '3 days',$1,'Weekly, synthetic'),('Nestlé sales','sales',now() - interval '4 hours',$2,'Synthetic weekly sales')`, [Math.round(Number(nObs) / 3), salesRows.length]);
+  await c.end();
 
-  // ---- SME rules
-  for (const [cond, sev, msg] of [
-    [{ attr: "fat_pct", op: ">", value: 2.5 }, "Medium", "High fat: raise the homogenisation window and add a creaming stability check to shelf-life testing."],
-    [{ attr: "solids_pct", op: ">", value: 15 }, "Medium", "High solids: sedimentation risk. Consider a stabiliser trial arm."],
-    [{ attr: "viscosity_cp", op: ">", value: 35 }, "Medium", "High target viscosity: watch fouling on the UHT heat exchanger and filler line pressure."],
-  ] as const)
-    await c.query("insert into cfg.sme_rule(category_id,condition,risk_effect,message,owner_user_id,approved_by) values ($1,$2,$3,$4,$5,$5)",
-      [cat, JSON.stringify(cond), JSON.stringify({ severity: sev }), msg, users.category_owner]);
+  // ---------------------------------------------------------------- app layer: moves and scenarios, mock photos
+  const analyst = (await q1<{ id: string }>(`select id from cfg.app_user where role='analyst'`))!.id;
+  const rep = (await q1<{ id: string }>(`select id from cfg.app_user where role='field_rep'`))!.id;
+  const r = await refreshRadar(analyst);
+  console.log(`[seed] ${nObs} observations, ${salesRows.length} weekly sales rows, ${r.created} moves detected as of ${r.asOf}`);
 
-  // ---- weights: platform-wide default is implicit (level 3). Category default set by the owner.
-  const ws = (await ins("insert into rec.weight_set(level,category_id,status,created_by,approved_by,reason) values ('category',$1,'Active',$2,$2,'Initial category defaults') returning id", [cat, users.category_owner])).id;
-  const aw: Record<string, number> = { viscosity_cp: 5, fat_pct: 4, solids_pct: 4, ph: 1, pack_ml: 1, base: 3 };
-  const pw: Record<string, number> = { homog_pressure_bar: 5, uht_temp_c: 5, hold_time_s: 3, fill_temp_c: 1, flow_rate_lph: 2 };
-  for (const [k, v] of Object.entries(aw)) await c.query("insert into rec.weight_item values ($1,'attribute',$2,$3)", [ws, AT[k], v]);
-  for (const [k, v] of Object.entries(pw)) await c.query("insert into rec.weight_item values ($1,'parameter',$2,$3)", [ws, P[k].id, v]);
-
-  // ---- history: ~60 closed launches (demo mode only)
-  let launchCount = 0;
-  if (DEMO) {
-  const names = ["Milk Tea", "Choco Malt", "Coffee Latte", "Oat Drink", "Cereal Beverage", "Cocoa", "Soy Milk", "Almond Drink", "Iced Coffee", "Malt Drink"];
-  const bases = ["milk", "plant", "coffee", "cocoa", "cereal"];
-  for (let i = 0; i < 60; i++) {
-    const base = pick(bases);
-    const a: A & { ph: number; pack_ml: number } = {
-      viscosity_cp: Math.round(rnd(8, 46)), fat_pct: round(rnd(0.5, 3.4), 1), solids_pct: round(rnd(8, 17.5), 1),
-      ph: round(rnd(6.45, 6.85), 2), pack_ml: pick([180, 200, 250]),
-    };
-    const line = pick(lines);
-    const pid = (await ins("insert into core.product(category_id,code,name,format) values ($1,$2,$3,$4) returning id", [cat, `H-${String(i + 1).padStart(3, "0")}`, `${pick(names)} ${a.pack_ml}ml (${base})`, `${a.pack_ml}ml carton`])).id;
-    for (const k of ["viscosity_cp", "fat_pct", "solids_pct", "ph", "pack_ml"] as const)
-      await c.query("insert into core.product_attribute_value(product_id,attribute_def_id,value_num) values ($1,$2,$3)", [pid, AT[k], a[k]]);
-    await c.query("insert into core.product_attribute_value(product_id,attribute_def_id,value_choice) values ($1,$2,$3)", [pid, AT.base, base]);
-    const spec = { viscosity_cp: [a.viscosity_cp * 0.92, a.viscosity_cp * 1.08], sediment_pct: [null, 0.5], creaming_idx: [null, 1.6], ph: [6.5, 6.9] } as Record<string, (number | null)[]>;
-    for (const [k, [mn, mx]] of Object.entries(spec))
-      await c.query("insert into core.product_spec values ($1,$2,$3,$4)", [pid, QT[k].id, mn === null ? null : round(mn, 2), mx === null ? null : round(mx, 2)]);
-
-    const created = new Date(Date.UTC(2024, 10, 1) + Math.floor(rnd(0, 700)) * 86400000);
-    const lid = (await ins("insert into core.launch_project(product_id,line_id,objective,status,created_by,created_at) values ($1,$2,$3,'Draft',$4,$5) returning id", [pid, line.id, "Launch on " + line.code, users.rd_engineer, created])).id;
-
-    // Initial engineer guess is off from the hidden ideal window by a few sigma.
-    const spread = { homog_pressure_bar: 1.6, uht_temp_c: 1.6, hold_time_s: 1.0, fill_temp_c: 1.0, flow_rate_lph: 1.0 } as Record<string, number>;
-    const z: Record<string, number> = {};
-    for (const k of Object.keys(P)) z[k] = gauss(r) * spread[k];
-    let day = 0;
-    let accepted = false;
-    for (let run = 1; run <= 6 && !accepted; run++) {
-      const actual: Record<string, number> = {};
-      for (const [k, p] of Object.entries(P)) actual[k] = round(p.ideal(a) + z[k] * p.sd, 2);
-      const vis = a.viscosity_cp * (1 - 0.045 * z.homog_pressure_bar + gauss(r) * 0.012);
-      const sed = 0.2 + 0.16 * Math.max(0, -z.homog_pressure_bar) + 0.1 * Math.max(0, -z.uht_temp_c) + gauss(r) * 0.02;
-      const cream = 1.0 + 0.25 * Math.max(0, -z.homog_pressure_bar) * (a.fat_pct / 2) + 0.05 * Math.abs(z.uht_temp_c) + gauss(r) * 0.03;
-      const ph = 6.7 - 0.035 * z.uht_temp_c + gauss(r) * 0.04;
-      const vals: Record<string, number> = { viscosity_cp: round(vis, 1), sediment_pct: round(sed, 3), creaming_idx: round(cream, 3), ph: round(ph, 2) };
-
-      const quality = Object.entries(vals).map(([code, value]) => ({
-        code, value, specMin: spec[code][0] === null ? null : round(spec[code][0]!, 2), specMax: spec[code][1] === null ? null : round(spec[code][1]!, 2), critical: QT[code].crit,
-      }));
-      const out = deriveRunResult({ quality, params: Object.entries(actual).map(([code, v]) => ({ code, actual: v, capMin: P[code].capMin, capMax: P[code].capMax })) });
-      const loss = out.result === "Pass" ? round(rnd(40, 100), 0) : round(rnd(160, 420), 0);
-      day += Math.round(rnd(4, 10));
-      const rid = (await ins(
-        "insert into core.trial_run(launch_id,run_no,started_at,ended_at,status,result,result_notes,loss_kg,next_step) values ($1,$2,$3,$3,'Closed',$4,$5,$6,$7) returning id",
-        [lid, run, new Date(created.getTime() + day * 86400000), out.result, JSON.stringify(out.notes), loss, out.result === "Pass" ? "TA" : "Repeat"],
-      )).id;
-      for (const [k, p] of Object.entries(P)) await c.query("insert into core.run_parameter values ($1,$2,$3,$3)", [rid, p.id, actual[k]]);
-      for (const q of quality) await c.query("insert into core.run_quality(run_id,quality_test_def_id,value,spec_min,spec_max,pass) values ($1,$2,$3,$4,$5,true)", [rid, QT[q.code].id, q.value, q.specMin, q.specMax]);
-
-      if (out.result !== "Pass") {
-        const reasons = new Set<string>();
-        for (const q of quality) {
-          const off = (q.specMin !== null && q.value < q.specMin) || (q.specMax !== null && q.value > q.specMax);
-          const span = q.specMin !== null && q.specMax !== null ? q.specMax - q.specMin : Math.abs(q.specMax ?? q.specMin ?? 0);
-          const near = q.critical && ((q.specMin !== null && q.value - q.specMin < 0.05 * span) || (q.specMax !== null && q.specMax - q.value < 0.05 * span));
-          if (off || near) reasons.add({ viscosity_cp: "viscosity_off", sediment_pct: "sedimentation", creaming_idx: "creaming", ph: "ph_off" }[q.code]!);
-        }
-        if (!reasons.size) reasons.add("equipment_issue");
-        for (const rc of reasons) await c.query("insert into core.run_reason(run_id,reason_code) values ($1,$2)", [rid, rc]);
-        // engineers learn from each run: deviations shrink
-        for (const k of Object.keys(z)) z[k] = z[k] * 0.4 + gauss(r) * 0.3;
-      } else {
-        accepted = true;
-        await c.query(
-          "update core.launch_project set status='Closed', ta_decision='Accepted', ta_date=$2, ta_by=$3, closed_at=$4 where id=$1",
-          [lid, new Date(created.getTime() + (day + 3) * 86400000).toISOString().slice(0, 10), users.qa, new Date(created.getTime() + (day + 3) * 86400000)],
-        );
-        launchCount++;
-      }
+  const gtPrice = async (code: string, store: string) => Number((await q1<{ p: string }>(`select price as p from mkt.observation o where o.sku_id=$1 and o.retailer_id=$2 order by observed_on desc limit 1`, [sid[code], retId[store]]))!.p);
+  type Item = { label: string; code: string | null; color: string; price: number | null; covered?: boolean; empty?: boolean };
+  const photo = async (store: string, date: string, rows: Item[][], pre: (item: Item, idx: number) => any) => {
+    const spec: ShelfSpec = { store: RETAILERS.find((x) => x[0] === store)![1], date, rows: rows.map((row) => row.map((i) => ({ label: i.label, color: i.color, price: i.price, covered: i.covered, empty: i.empty }))) };
+    const bytes = await renderShelf(spec);
+    const id = await createPhoto(rep, { retailerId: retId[store], takenOn: date, bytes, mime: "image/png", isMock: true });
+    let idx = 0; const items: string[] = [];
+    for (const row of rows) for (const it of row) {
+      const ai = pre(it, idx);
+      const ins = await q1<{ id: string }>(`insert into mkt.photo_item(photo_id,idx,label,sku_id,ai_price,ai_facings,ai_conf,ai_note,needs_check) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
+        [id, idx, it.label, it.code ? sid[it.code] : null, ai.price, ai.facings, ai.conf, ai.note, ai.conf < 0.8 || ai.price == null]);
+      items.push(ins!.id); idx++;
     }
-    if (!accepted) await c.query("update core.launch_project set status='Cancelled', cancel_reason='Stopped after repeated misses' where id=$1", [lid]);
-  }
-
-  // ---- one open launch ready for the live demo (high viscosity, high fat: triggers flags and rules)
-  const dp = (await ins("insert into core.product(category_id,code,name,format) values ($1,'D-001','Choco Malt RTD 200ml (demo)','200ml carton') returning id", [cat])).id;
-  const demo: Record<string, number | string> = { viscosity_cp: 38, fat_pct: 2.8, solids_pct: 15.5, ph: 6.7, pack_ml: 200 };
-  for (const [k, v] of Object.entries(demo)) await c.query("insert into core.product_attribute_value(product_id,attribute_def_id,value_num) values ($1,$2,$3)", [dp, AT[k], v]);
-  await c.query("insert into core.product_attribute_value(product_id,attribute_def_id,value_choice) values ($1,$2,'cocoa')", [dp, AT.base]);
-  for (const [k, mn, mx] of [["viscosity_cp", 35, 41], ["sediment_pct", null, 0.5], ["creaming_idx", null, 1.6], ["ph", 6.5, 6.9]] as const)
-    await c.query("insert into core.product_spec values ($1,$2,$3,$4)", [dp, QT[k].id, mn, mx]);
-  await c.query("insert into core.launch_project(product_id,line_id,objective,status,created_by) values ($1,$2,'Demo launch: new choco malt RTD','Draft',$3)", [dp, lines[2].id, users.rd_engineer]);
-
-  }
-  const a = await seedAssets(c, { lines, users, history: DEMO });
-  if (DEMO) await seedLineHealth(c, { users });
-  console.log(DEMO ? `[seed] ${a.positions} seal positions, ${a.parts} seals; ${launchCount} accepted launches, 1 open demo launch` : "[seed] reference configuration only (no launches)");
+    return { id, items };
+  };
+  const reading = (it: Item) => it.covered ? { price: null, facings: 1, conf: 0.5, note: "Tag partly covered, not guessed" } : it.empty ? { price: it.price, facings: 0, conf: 0.82, note: "Empty slot, out of stock" } : { price: it.price, facings: 2, conf: 0.93, note: "Tag clear" };
+  const P = { n: await gtPrice("N-RTD-180", "GT-3"), c: await gtPrice("C-RTD-180", "GT-3"), y: await gtPrice("N-YOG-4", "GT-3"), u: await gtPrice("N-UHT-1L", "GT-3") };
+  await photo("GT-3", add(D, -1), [
+    [{ label: "Our RTD choc 180 ml", code: "N-RTD-180", color: "#7a4a2b", price: P.n }, { label: "Competitor C RTD 180 ml", code: "C-RTD-180", color: "#2b6fb5", price: P.c }, { label: "Competitor C RTD 180 ml", code: "C-RTD-180", color: "#2b6fb5", price: P.c }],
+    [{ label: "Our UHT 1 L", code: "N-UHT-1L", color: "#0b6e4f", price: P.u }, { label: "Our drinking yoghurt x4", code: "N-YOG-4", color: "#0072a8", price: P.y, covered: true }, { label: "", code: "N-YOG-4", color: "#999", price: P.y, empty: true }],
+  ], reading);
+  await photo("GT-5", add(D, -1), [
+    [{ label: "Our RTD choc 180 ml", code: "N-RTD-180", color: "#7a4a2b", price: await gtPrice("N-RTD-180", "GT-5") }, { label: "Competitor C RTD 180 ml", code: "C-RTD-180", color: "#2b6fb5", price: await gtPrice("C-RTD-180", "GT-5") }],
+    [{ label: "Our UHT 1 L", code: "N-UHT-1L", color: "#0b6e4f", price: await gtPrice("N-UHT-1L", "GT-5") }],
+  ], reading);
+  const old = await photo("GT-2", add(D, -8), [[{ label: "Our RTD choc 180 ml", code: "N-RTD-180", color: "#7a4a2b", price: await gtPrice("N-RTD-180", "GT-2") }, { label: "Competitor C RTD 180 ml", code: "C-RTD-180", color: "#2b6fb5", price: await gtPrice("C-RTD-180", "GT-2") }]], reading);
+  for (const id of old.items) await checkItem(rep, id, { action: "confirm" });
+  const hash = createHash("sha256").update("seed").digest("hex").slice(0, 8);
+  console.log(`[seed] 3 mock shelf photos (${hash}), 1 already confirmed. done`);
+  void tx; void qc; void q;
 }
-
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

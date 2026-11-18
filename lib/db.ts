@@ -3,15 +3,15 @@ import { Pool, PoolClient, QueryResultRow, types } from "pg";
 // Return DATE columns as "YYYY-MM-DD" strings. The default converts them to a local-time Date, which shifts the day in some time zones.
 types.setTypeParser(1082, (v: string) => v);
 
-const g = globalThis as unknown as { __baf1Pool?: Pool };
+const g = globalThis as unknown as { __radarPool?: Pool };
 
 export function pool(): Pool {
-  if (!g.__baf1Pool) {
+  if (!g.__radarPool) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is not set");
-    g.__baf1Pool = new Pool({ connectionString: url, max: 10, idleTimeoutMillis: 30_000 });
+    g.__radarPool = new Pool({ connectionString: url, max: 10, idleTimeoutMillis: 30_000 });
   }
-  return g.__baf1Pool;
+  return g.__radarPool;
 }
 
 export type Ctx = { userId?: string | null; reason?: string | null; adminOverride?: boolean };

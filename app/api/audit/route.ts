@@ -1,10 +1,5 @@
 import { route } from "@/lib/api";
 import { requireRole } from "@/lib/auth";
-import { auditEvents } from "@/lib/repo";
-
+import { q } from "@/lib/db";
 export const dynamic = "force-dynamic";
-export const GET = route(async (req) => {
-  await requireRole("viewAudit");
-  const limit = Math.min(500, Math.max(1, Number(new URL(req.url).searchParams.get("limit") ?? 100)));
-  return { events: await auditEvents(limit) };
-});
+export const GET = route(async () => { await requireRole("viewAudit"); return { events: await q(`select e.id, e.at, u.name as user_name, e.action, e.entity, e.entity_id, e.reason from audit.event e left join cfg.app_user u on u.id=e.user_id order by e.id desc limit 200`) }; });

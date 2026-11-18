@@ -16,11 +16,11 @@ export const models = {
 
 export const aiEnabled = () => !!process.env.ANTHROPIC_API_KEY;
 
-const g = globalThis as unknown as { __baf1Anthropic?: Anthropic };
+const g = globalThis as unknown as { __radarAnthropic?: Anthropic };
 function client(): Anthropic {
   if (!aiEnabled()) throw new AiUnavailable();
-  if (!g.__baf1Anthropic) g.__baf1Anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 90_000, maxRetries: 2 });
-  return g.__baf1Anthropic;
+  if (!g.__radarAnthropic) g.__radarAnthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 90_000, maxRetries: 2 });
+  return g.__radarAnthropic;
 }
 
 /** Every Claude call is written to ai.call_log with the ids of the rows it was given (supports BR-09). */

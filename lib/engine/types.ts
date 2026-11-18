@@ -1,129 +1,39 @@
-export const ENGINE_VERSION = "baf1-engine-1.1.0";
+export const ENGINE_VERSION = "radar-engine-1.0.0";
 
-export type AttrDef = {
-  id: string;
-  code: string;
-  name: string;
-  unit: string | null;
-  type: "numeric" | "choice" | "boolean" | "text" | "date";
-  choices?: string[] | null;
-  required: boolean;
-  absMin: number | null;
-  absMax: number | null;
-  /** matching = drives the similarity search. info = shown and stored, never used for matching. */
-  kind?: "matching" | "info";
-  helpText?: string | null;
-  section?: string | null;
-  sortOrder?: number;
-  status?: "Draft" | "Active" | "Retired";
-  /** false = never sent to Claude */
-  aiVisible?: boolean;
+export type Settings = {
+  z_threshold: number; min_change_pct: number; promo_depth_pct: number; shelf_gap_pct: number; oos_min_retailers: number;
+  diversion_rate: number; gross_margin: number; promo_depth_scenario_pct: number; shelf_uplift_pct: number; default_elasticity: number;
+  oos_loss_rate: number; level_high_vnd: number; level_medium_vnd: number;
+};
+export const DEFAULT_SETTINGS: Settings = {
+  z_threshold: 3, min_change_pct: 3, promo_depth_pct: 12, shelf_gap_pct: 8, oos_min_retailers: 3,
+  diversion_rate: 0.3, gross_margin: 0.32, promo_depth_scenario_pct: 5, shelf_uplift_pct: 3, default_elasticity: -1.4,
+  oos_loss_rate: 0.3, level_high_vnd: 120_000_000, level_medium_vnd: 40_000_000,
 };
 
-export type ParamDef = {
-  id: string;
-  code: string;
-  name: string;
-  unit: string;
-  absMin: number;
-  absMax: number;
-  isCritical: boolean;
-  isLocked: boolean;
-  stepSeq: number;
+export type Sku = { id: string; code: string; name: string; brand: string; isNestle: boolean; packMl: number; competesWith: string | null };
+export type Obs = {
+  id: number; skuId: string; retailerId: string; channelId: string; on: string; price: number; promoPrice: number | null;
+  promoText?: string | null; packMl: number | null; inStock: boolean; facings: number | null; source: string;
+};
+export type Sales = { skuId: string; channelId: string; weekStart: string; units: number; revenue: number };
+export type Elast = { value: number; low: number; high: number; method: "log-log" | "default"; n: number };
+
+export type MoveKind = "price_cut" | "price_rise" | "promo" | "pack_change" | "shelf_gap" | "out_of_stock";
+export type Level = "High" | "Medium" | "Low";
+export type Move = {
+  kind: MoveKind; skuId: string; nestleSkuId: string; channelId: string; title: string; baseline: number | null; observed: number | null;
+  changePct: number | null; z: number | null; coverage: number; exposure: number; exposureLow: number; exposureHigh: number; level: Level;
+  evidence: { obsId?: number; fact: string }[]; revenueWeek: number;
 };
 
-export type Attrs = Record<string, number | string | boolean>;
-
-/** A closed launch used as evidence. */
-export type HistLaunch = {
-  launchId: string;
-  code: string;
-  productName: string;
-  lineId: string;
-  attrs: Attrs;
-  /** Settings of the accepted run (parameter code -> actual value). null if the launch never reached acceptance. */
-  acceptedParams: Record<string, number> | null;
-  runs: number;
-  totalLossKg: number;
-  firstPass: boolean;
-  /** reason codes recorded on failed / marginal runs of this launch */
-  reasons: string[];
+export type ScenarioKind = "hold" | "promo" | "match_price" | "shelf_action" | "restock";
+export type Scenario = {
+  label: string; kind: ScenarioKind; title: string; volumePct: number; volumeLow: number; volumeHigh: number; marginVnd: number; costText: string;
+  riskText: string; confidence: Level; needsCategoryManager: boolean; assumptions: Record<string, unknown>;
 };
 
-export type WeightLevels = {
-  attributes: Record<string, number>; // attribute code -> 0..5
-  parameters: Record<string, number>; // parameter code -> 0..5
-};
-
-export type LineCaps = Record<string, { min: number; max: number }>; // parameter code -> capability
-
-export type SmeRule = {
-  id: string;
-  condition: RuleCondition;
-  severity: "Low" | "Medium" | "High";
-  message: string;
-};
-export type RuleCondition =
-  | { attr: string; op: ">" | ">=" | "<" | "<=" | "=="; value: number | string | boolean }
-  | { all: RuleCondition[] };
-
-export type Severity = "Low" | "Medium" | "High";
-export type Confidence = "High" | "Medium" | "Low";
-
-export type RiskFlag = {
-  type: "low_evidence" | "rework_history" | "out_of_range" | "spread" | "sme_rule" | "clipped" | "missing_data";
-  severity: Severity;
-  message: string;
-  detail?: Record<string, unknown>;
-  smeRuleId?: string;
-};
-
-export type Neighbour = {
-  launchId: string;
-  code: string;
-  similarity: number;
-  rank: number;
-  wasGood: boolean; // reached acceptance on the first run
-  /** share of the weighted fields that both products have a value for (1 = all) */
-  coverage: number;
-};
-
-export type RecLine = {
-  code: string;
-  startValue: number;
-  windowLow: number;
-  windowHigh: number;
-  clipped: boolean;
-  clipReason?: string;
-  basedOn: number; // number of neighbour launches contributing
-};
-
-export type RecResult = {
-  engineVersion: string;
-  neighbours: Neighbour[];
-  lines: RecLine[];
-  confidence: Confidence;
-  flags: RiskFlag[];
-  overallRisk: Severity;
-  nMatched: number;
-  meanSimilarity: number;
-  meanCoverage: number;
-  /** matching fields left out of the comparison, with the reason */
-  ignoredFields: { code: string; name: string; reason: string }[];
-  normalisedWeights: { attributes: Record<string, number>; parameters: Record<string, number> };
-};
-
-export type RecInput = {
-  attrDefs: AttrDef[];
-  paramDefs: ParamDef[];
-  target: Attrs;
-  lineId: string;
-  lineCaps: LineCaps;
-  history: HistLaunch[];
-  weights: WeightLevels;
-  rules: SmeRule[];
-  topN: number;
-  minMatched: number;
-  /** a matching field is only used when at least this share of past launches has a value (default 0.3) */
-  minFieldCoverage?: number;
-};
+export const median = (a: number[]) => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+export const mad = (a: number[]) => { const m = median(a); return median(a.map((x) => Math.abs(x - m))); };
+export const addDays = (d: string, n: number) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+export const round = (v: number, d = 1) => Math.round(v * 10 ** d) / 10 ** d;

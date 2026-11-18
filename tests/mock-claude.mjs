@@ -1,10 +1,9 @@
 // Minimal mock of the Anthropic Messages API for testing the AI code paths without a key.
 //   node tests/mock-claude.mjs            (listens on :9999)
 //   ANTHROPIC_API_KEY=mock ANTHROPIC_BASE_URL=http://localhost:9999 npm start
-// It returns canned tool calls that include deliberate mistakes (a wrong number, a fake citation, an out-of-range value)
-// so the server-side guardrails can be seen working.
+// It returns canned answers that include deliberate mistakes (a fake citation, a covered price, an out-of-range price)
+// so the server-side guardrails can be seen working. A very small image is treated as unreadable.
 import http from "node:http";
-import fs from "node:fs";
 
 const text = (c) => (typeof c === "string" ? c : JSON.stringify(c));
 const reply = (content, stop = "end_turn") => ({
@@ -16,45 +15,35 @@ http.createServer((req, res) => {
   let raw = "";
   req.on("data", (d) => (raw += d));
   req.on("end", () => {
-    if (process.env.MOCK_LOG) fs.appendFileSync(process.env.MOCK_LOG, raw + "\n"); // record every request, to inspect what a prompt contains
     const body = raw ? JSON.parse(raw) : {};
     const tool = body.tool_choice?.type === "tool" ? body.tool_choice.name : null;
     const all = text(body.messages);
     let out;
-    if (tool === "fill_request")
-      out = reply([{ type: "tool_use", id: "t1", name: tool, input: { product_name: "Choco Malt RTD 200ml", attributes: { viscosity_cp: 38, fat_pct: 2.8, solids_pct: 15.5, base: "cocoa", pack_ml: 99999, bogus_field: 1 }, unparsed: ["wants a red cap"] } }], "tool_use");
-    else if (tool === "write_explanation") {
-      const codes = [...all.matchAll(/L-\d{4}/g)].map((m) => m[0]);
+    if (tool === "read_shelf_photo") {
+      const img = body.messages?.[0]?.content?.find?.((b) => b.type === "image");
+      const tiny = !img || img.source.data.length < 3000;
+      out = reply([{ type: "tool_use", id: "t1", name: tool, input: tiny
+        ? { usable: false, notes: "Photo is too small or blurred to read", items: [] }
+        : { usable: true, notes: "Two rows of products", items: [
+          { label: "Our RTD chocolate 180 ml", sku_code: "N-RTD-180", price: 11500, facings: 2, confidence: 0.95, note: "Tag clear" },
+          { label: "Competitor C RTD 180 ml", sku_code: "C-RTD-180", price: 10500, facings: 3, confidence: 0.92, note: "Tag clear" },
+          { label: "Our drinking yoghurt x4", sku_code: "N-YOG-4", price: null, facings: 1, confidence: 0.4, note: "Tag partly covered, not guessed" },
+          { label: "Our UHT 1 L", sku_code: "N-UHT-1L", price: 125000, facings: 2, confidence: 0.9, note: "Tag clear" },
+          { label: "Local brand milk", sku_code: null, price: 9000, facings: 1, confidence: 0.9, note: "Not one of our tracked SKUs" },
+        ] } }], "tool_use");
+    } else if (tool === "write_brief") {
+      const codes = [...new Set([...all.matchAll(/M-\d{4}/g)].map((m) => m[0]))];
       out = reply([{ type: "tool_use", id: "t1", name: tool, input: {
-        summary: `Seven similar launches support a start near 200 bar. A margin of 777 bar was never observed.`,
-        key_points: [{ text: `Closest match ${codes[0]} passed or needed rework as listed.`, evidence_codes: [codes[0], "L-9999"] }],
-        watch_outs: ["Creaming risk with high fat."] } }], "tool_use");
-    } else if (tool === "record_trial_run")
-      out = reply([{ type: "tool_use", id: "t1", name: tool, input: {
-        parameters: [{ code: "homog_pressure_bar", actual: 205, source_quote: "Homogenizer 205 bar" }, { code: "uht_temp_c", actual: 140.5 }, { code: "hold_time_s", actual: 4.7 }, { code: "fill_temp_c", actual: 22 }, { code: "flow_rate_lph", actual: 4650 }],
-        quality: [{ code: "viscosity_cp", value: 38.4 }, { code: "sediment_pct", value: 0.31 }, { code: "creaming_idx", value: 1.2 }, { code: "ph", value: 6.7 }],
-        product_fields: [{ code: "pack_type", value: "pouch", source_quote: "Packed in pouches" }, { code: "organic", value: "maybe", source_quote: "organic?" }],
-        loss_kg: 75, notes: "Imported" } }], "tool_use");
-    else if (tool === "assess_seal_photo") {
-      const blurry = all.includes("QkxVUg"); // base64 of "BLUR" at the start of the fake photo
-      out = reply([{ type: "tool_use", id: "t1", name: tool, input: blurry
-        ? { usable: false, rating: 1, findings: "Photo is blurred", confidence: "low" }
-        : { usable: true, rating: 4, findings: "Chipped edge on the sealing lip, a fragment could come off.", confidence: "medium" } }], "tool_use");
-    } else if (tool === "propose_rules")
-      out = reply([{ type: "tool_use", id: "t1", name: tool, input: { rules: [{ attr: "fat_pct", op: ">", value: 2.8, severity: "Medium", message: "Fat above 2.8%: more rework seen.", rationale: "Rework rate rises in the top band.", evidence_codes: ["L-1001", "L-1002"] }] } }], "tool_use");
-    else if (!tool && body.tools?.some((t) => t.name === "get_plant_status")) {
-      if (!all.includes("tool_result")) out = reply([{ type: "tool_use", id: "t4", name: "get_plant_status", input: {} }], "tool_use");
-      else out = reply([{ type: "text", text: "L1 needs attention first: see the plug seal [P:S-NOPE-1] and launch [L:L-9998]. Seal risk is a trend, not a certainty." }]);
-    } else if (!tool && body.tools?.some((t) => t.name === "get_health")) {
-      if (!all.includes("tool_result")) out = reply([{ type: "tool_use", id: "t3", name: "get_health", input: {} }], "tool_use");
-      else out = reply([{ type: "text", text: "Filling valve 3 needs attention first: fill-weight alarms are repeating [A:A-FW-03] and the plug seal is rated High [P:S-NOPE-0]. Follow [G:G-FILLWT]. Also see [G:G-FAKE-99]." }]);
-    } else if (!tool && body.tools?.length) {
-      // history Q&A: first turn asks for a tool, second turn answers
-      const gotResult = all.includes("tool_result");
-      if (!gotResult) out = reply([{ type: "tool_use", id: "t2", name: "search_launches", input: { filters: [{ attr: "viscosity_cp", op: ">", value: 35 }], needed_rework: true } }], "tool_use");
+        headline: `Two price moves need a decision this week`,
+        sections: [
+          { title: "Summary", text: `The biggest move is ${codes[0] ?? "none"} [M:${codes[0] ?? "M-0000"}]. A second move [M:${codes[1] ?? "M-0000"}] follows. Exposure figures are estimates with a range.` },
+          { title: "Unverified", text: `A third move [M:M-9999] was mentioned, and a price [O:99999999] that is not in the data.` },
+        ] } }], "tool_use");
+    } else if (!tool && body.tools?.some((t) => t.name === "get_moves")) {
+      if (!all.includes("tool_result")) out = reply([{ type: "tool_use", id: "t5", name: "get_moves", input: {} }], "tool_use");
       else {
-        const code = (all.match(/L-\d{4}/) || ["L-1001"])[0];
-        out = reply([{ type: "text", text: `Launches with high viscosity needed rework, for example [${code}]. I could not confirm [L-9999].` }]);
+        const code = (all.match(/M-\d{4}/) || ["M-2001"])[0];
+        out = reply([{ type: "text", text: `The biggest move is ${code} [M:${code}]. I cannot confirm [M:M-9999]. Impact is an estimate, not a certainty.` }]);
       }
     } else out = reply([{ type: "text", text: "ok" }]);
     res.setHeader("content-type", "application/json");

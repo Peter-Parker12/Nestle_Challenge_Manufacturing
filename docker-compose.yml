@@ -1,4 +1,4 @@
-# BAF-1 Launch Accelerator
+# Market Move Radar (SALES-2)
 # Only the app is exposed (port 9361). Postgres is reachable on the internal network only.
 services:
   db:
@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - baf1_pgdata:/var/lib/postgresql/data
+      - radar_pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -27,13 +27,6 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       CLAUDE_MODEL_MAIN: ${CLAUDE_MODEL_MAIN:-claude-sonnet-5-5}
       CLAUDE_MODEL_FAST: ${CLAUDE_MODEL_FAST:-claude-haiku-5-5}
-      MIN_MATCHED_LAUNCHES: ${MIN_MATCHED_LAUNCHES:-3}
-      TOP_N_NEIGHBOURS: ${TOP_N_NEIGHBOURS:-7}
-      MIN_FIELD_COVERAGE: ${MIN_FIELD_COVERAGE:-0.3}
-      MCP_API_KEY: ${MCP_API_KEY:-}
-      MCP_SERVICE_ROLE: ${MCP_SERVICE_ROLE:-rd_engineer}
-      MCP_RATE_LIMIT_PER_MIN: ${MCP_RATE_LIMIT_PER_MIN:-60}
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
       SEED_MODE: ${SEED_MODE:-none}
       DEMO_USER_SWITCHER: ${DEMO_USER_SWITCHER:-true}
       NODE_ENV: production
@@ -50,4 +43,4 @@ services:
       start_period: 40s
 
 volumes:
-  baf1_pgdata:
+  radar_pgdata:

@@ -21,9 +21,9 @@ export class HttpError extends Error {
 
 export async function getUser(): Promise<User> {
   const jar = await cookies();
-  const id = jar.get("baf1_user")?.value;
+  const id = jar.get("radar_user")?.value;
   let u = id ? await q1<User>("select id, name, role from cfg.app_user where id=$1 and active", [id]) : null;
-  if (!u) u = await q1<User>("select id, name, role from cfg.app_user where role='rd_engineer' and active order by name limit 1");
+  if (!u) u = await q1<User>("select id, name, role from cfg.app_user where role='sales_lead' and active order by name limit 1");
   if (!u) throw new HttpError(401, "No users configured. Run the seed.", "no_user");
   return u;
 }
@@ -31,6 +31,6 @@ export async function getUser(): Promise<User> {
 export async function requireRole(action: keyof typeof PERMISSIONS): Promise<User> {
   const u = await getUser();
   if (!(PERMISSIONS[action] as Role[]).includes(u.role))
-    throw new HttpError(403, `Role '${u.role}' is not allowed to do this (${action}).`, "forbidden");
+    throw new HttpError(403, `Role '${u.role}' is not allowed to do this (${String(action)}).`, "forbidden");
   return u;
 }
